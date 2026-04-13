@@ -15,7 +15,7 @@ figures_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures'
 os.makedirs(figures_dir, exist_ok=True)
 
 #Hyperparameters - these MUST match training 
-ninputs = 9
+ninputs = 6
 nhidden = 64
 nlayers = 1
 
@@ -63,6 +63,10 @@ flowobs_val = unscale_series(labels_val[0,:],labelscales).numpy()
 rainseries_test = unscale_series(inputs_test[0,:,0],inputscales).numpy()
 flowpred_test = unscale_series(pred_test[0,:],labelscales).numpy()
 flowobs_test = unscale_series(labels_test[0,:],labelscales).numpy()
+
+#Save predictions to be used in Diebold Mariano Test (separate script)
+np.save('predictions_val.npy', flowpred_val)
+np.save('observations_val.npy', flowobs_val)
 
 ######### EVALUATION ###########
 #Calculate the NSE on training 
@@ -142,11 +146,11 @@ ax.set_title('ACF of residuals')
 fig.savefig(os.path.join(figures_dir, 'residuals_acf.png'), dpi=150)
 
 #Create box & whisker plot of features 
-data_bw = inputs_train.squeeze(0).numpy() #shape = (timesteps, 8)
-var_names = ['precip', 'ETp', 'precip_30d', 'precip_7d', 'precip_90d', 'precip_surplus', 'temp', 'groundwater', 'melt']
+data_bw = inputs_train.squeeze(0).numpy() #shape = (timesteps, 6)
+var_names = ['precip', 'ETp', 'precip_30d', 'temp', 'groundwater', 'melt']
 fig, ax = plt.subplots(figsize = (10,5))
 bp = ax.boxplot(data_bw, tick_labels = var_names, patch_artist = True, showfliers = True)
-colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728','#9467bd', '#8c564b', '#e377c2', '#7f7f7f','#17becf']
+colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#e377c2', '#7f7f7f','#17becf']
 for patch, color in zip(bp['boxes'], colors):
     patch.set_facecolor(color)
 fig.savefig(os.path.join(figures_dir, 'boxandwhisker.png'), dpi=150)
