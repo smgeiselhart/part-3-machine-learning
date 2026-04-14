@@ -2,7 +2,8 @@ import torch
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from captum.attr import (ShapleyValueSampling, IntegratedGradients)
+from captum.attr import (ShapleyValueSampling,
+                         IntegratedGradients)
 from B_lstm_forecaster import load_datafile, scale_series, unscale_series, nse, mse
 from model import LSTMModel
 
@@ -17,7 +18,6 @@ from model import LSTMModel
 # IntegratedGradients uses target=t to select a specific output timestep,
 # so it does not need a wrapper — the raw model is used directly.
 
-#Wrapper used to create a single number from model output - required for Shapley
 class ScalarWrapper(torch.nn.Module):
     def __init__(self, base_model, warmup):
         super().__init__()
@@ -30,11 +30,11 @@ class ScalarWrapper(torch.nn.Module):
 
 
 # =============================================================================
-# Hyperparameters - MUST MATCH WHAT WAS USED TO TRAIN MODEL 
+# Hyperparameters - UPDATE TO MATCH BEST CONFIGURATION
 # =============================================================================
 
 index_warmup     = 182 #half a year 
-ninputs          = 6
+ninputs          = 7
 nhidden          = 64
 nlayers          = 1
 
@@ -56,7 +56,6 @@ labels_test, labelscales = scale_series(labels_test, labelscales)
 inputs_all = torch.cat([inputs_train, inputs_val, inputs_test], dim=1)
 labels_all = torch.cat([labels_train, labels_val, labels_test], dim=1)
 
-#Track the split positions for slicing later 
 n_train = inputs_train.shape[1]
 n_val = inputs_val.shape[1]
 
@@ -64,10 +63,9 @@ n_val = inputs_val.shape[1]
 # Load model and weights
 # =============================================================================
 
-#Creates a fresh LSTM with the same architecture and loads the saved weights from training 
 model = LSTMModel(ninputs, nhidden, 1, nlayers, 0)
 model.load_state_dict(torch.load('weights.csv'))
-model.eval()    #Doesn't track gradients bc we're not training 
+model.eval()
 
 # =============================================================================
 # Baseline (shared by both methods)
@@ -78,29 +76,26 @@ model.eval()    #Doesn't track gradients bc we're not training
 # Completeness guarantee: sum(attributions) = F(x) - F(baseline)
 
 ## Mixed baseline:
-#   Precip (0), Precip 30d (2), Melt (5) → 0 (no forcing)
-#   ETp (1), Temp (3), Groundwater (4) → training mean
-train_mean = inputs_train.mean(dim=1, keepdim=True)       # (1, 1, 6)
+#   Precip 30d (0), Precip 7d (1), Precip 90d (2), Melt (6) → 0 (no forcing)
+#   Precip surplus (3), Temp (4), Groundwater (5) → training mean
+train_mean = inputs_train.mean(dim=1, keepdim=True)       # (1, 1, 7)
 baseline   = torch.zeros_like(inputs_val)                 # start from all zeros
 
-#Set training mean for: ETp(1), temp(3), groundwater(4)
-for col in [1, 3, 4]:
+#Set training mean for: precip_surplus(3), temp(4), groundwater(5)
+for col in [3, 4, 5]:
     baseline[:, :, col] = train_mean[:, :, col].expand_as(baseline[:, :, col])
 baseline = baseline.detach()
 
 
-feature_names = ['Precip', 'Etp', 'Precip 30d', 'Temp', 'Groundwater', 'Melt']
+feature_names = ['Precip 30d', 'Precip 7d', 'Precip 90d', 'Precip surplus', 'Temp', 'Groundwater', 'Melt']
 T_val = inputs_val.shape[1]
 
 # =============================================================================
 # ShapleyValueSampling — Global Feature Importance
 # =============================================================================
 
-#Using wrapper so model outputs a single number 
 wrapped = ScalarWrapper(model, index_warmup) #the wrapper will compute the average of the flows predicted by the LSTM model
 
-#treats all timesteps of same feature as one group 
-#Without this, we would have ~10,000s shapley values 
 feature_mask = torch.zeros(1, T_val, ninputs, dtype=torch.long)
 for i in range(ninputs):
     feature_mask[:, :, i] = i  # group 0 = Rain, 1 = PET, 2 = Rain 30d
@@ -114,7 +109,7 @@ attributions = svs.attribute(
     n_samples=200,
     show_progress=True,
 )
-feature_importance      = attributions[0, 0, :].detach().numpy()  # (6,)
+feature_importance      = attributions[0, 0, :].detach().numpy()  # (7,)
 feature_importance_norm = feature_importance / feature_importance.sum()
 
 print("\nGlobal feature importance (ShapleyValueSampling, normalised):")
@@ -131,7 +126,7 @@ shap_step   = 1
 out_indices = list(range(index_warmup, T_val, shap_step))
 n_out       = len(out_indices)
 
-temporal_importance = np.zeros((n_out, 6))
+temporal_importance = np.zeros((n_out, 7))
 convergence_deltas  = np.zeros(n_out)
 
 print(f"\nComputing IntegratedGradients for {n_out} output timesteps...")
@@ -158,6 +153,8 @@ temporal_importance_norm = np.where(
     row_sums > 0, temporal_importance / row_sums, 0.0
 )
 
+#Save 
+
 # =============================================================================
 # Prepare series for input and discharge panels (unscale to physical units)
 # =============================================================================
@@ -177,6 +174,17 @@ flow_pred = unscale_series(pred_val[0, :],   labelscales).detach().numpy()
 
 t_axis = list(range(T_val))
 
+# Save results so figures can be recreated without rerunning the analysis
+np.savez('Data/shapley_results.npz',
+         feature_names=np.array(feature_names),
+         feature_importance_norm=feature_importance_norm,
+         out_indices=np.array(out_indices),
+         temporal_importance_norm=temporal_importance_norm,
+         inputs_val_phys=inputs_val_phys,
+         flow_obs=flow_obs,
+         flow_pred=flow_pred,
+         t_axis=np.array(t_axis))
+
 # =============================================================================
 # Plot — 4 panels
 # =============================================================================
@@ -185,7 +193,7 @@ fig, axes = plt.subplots(
     nrows=4, figsize=(12, 14),
     gridspec_kw={'height_ratios': [0.9, 1.4, 1.2, 1.2]}
 )
-colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#e377c2', '#7f7f7f','#17becf']
+colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728','#9467bd', '#8c564b', '#e377c2', '#7f7f7f','#17becf']
 
 # Share x-axis across the three time series panels (rows 1, 2, 3)
 axes[2].sharex(axes[1])
@@ -198,15 +206,19 @@ bars = ax.bar(feature_names, feature_importance_norm, color=colors,
 ax.set_ylabel('Normalised\nImportance')
 ax.set_title('(a) Global Feature Importance (ShapleyValueSampling)',
              fontsize=11, fontweight='bold', loc='left')
-ax.set_ylim(0, max(feature_importance_norm) * 1.3)
+y_max = max(feature_importance_norm) * 1.3
+y_min = min(feature_importance_norm) * 1.3 if min(feature_importance_norm) < 0 else 0
+ax.set_ylim(y_min, y_max)
+ax.axhline(0, color = 'black', linewidth = 0.5)
 ax.set_yticks([])
 ax.spines[['top', 'right']].set_visible(False)
 for bar, val in zip(bars, feature_importance_norm):
-    ax.text(
-        bar.get_x() + bar.get_width() / 2,
-        bar.get_height() + 0.01,
-        f'{val:.1%}', ha='center', va='bottom', fontsize=11, fontweight='bold'
-    )
+    if val >= 0:
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+            f'{val:.1%}', ha='center', va='bottom', fontsize=11, fontweight='bold')
+    else: 
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() - 0.01, 
+        f'{val:.1%}', ha='center', va='top', fontsize=11, fontweight='bold')
 
 # --- Panel 2: Temporal Output Importance (IntegratedGradients) ---
 ax2 = axes[1]
@@ -225,7 +237,7 @@ ax3 = axes[2]
 # Rain as bars (standard hydrological convention), PET and rain_month as lines
 ax3.bar(t_axis, inputs_val_phys[:, 0], color=colors[0],
         label=feature_names[0], width=1.0, alpha=0.75)
-for i in range(1,6):
+for i in range(1,7):
     ax3.plot(t_axis, inputs_val_phys[:, i], color = colors[i],
              label = feature_names[i], linewidth = 1.4)
 ax3.set_ylabel('mm/day')
