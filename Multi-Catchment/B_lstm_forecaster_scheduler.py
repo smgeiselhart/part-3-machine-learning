@@ -84,7 +84,7 @@ for c in catchment_data:
 
 #################################################################
 #Step 2: Train with CyclicLR Scheduler 
-model = LSTMModel(ninputs, nhidden, 1, nlayers, 0)
+model = LSTMModel(ninputs, nhidden, 1, nlayers, 0.2)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
 # Triangular cyclical learning rate scheduler.
