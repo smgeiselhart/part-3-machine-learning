@@ -16,7 +16,7 @@ os.makedirs(figures_dir, exist_ok=True)
 # define time periods number of epochs to train and LSTM hyperparameters
 index_warmup = 182  # time step index where warm up period ends
 
-epochs = 500
+epochs = 300
 
 ninputs = len(feature_cols)  # no. of input variables
 nhidden = 64  # no. of hidden states, i.e. "parallel" LSTM cells
