@@ -31,7 +31,15 @@ def load_catchment(catchment_name):
     datafile = os.path.join(datafolder, catchment_name, 'LSTM_dataframe.csv')
     data_in=pd.read_csv(datafile, sep=',', index_col = 0, parse_dates = True)
    
-    #Interpolate all NaN values 
+    #Load static catchment properties 
+    properties_file = os.path.join(datafolder, catchment_name, 'catchment_properties.csv')
+    properties = pd.read_csv(properties_file, sep = ';', index_col = 0, skipinitialspace = True)
+
+    static_cols = ['area_ha', 'mean_slope_percent', 'rural_percent', 
+                   'urban_percent', 'nature_percent', 'lake_percent']
+    static = torch.tensor([float(properties.loc[col, 'value']) for col in static_cols], dtype = torch.float32)
+
+    #Interpolate all NaN values in timeseries data 
     data_in.interpolate(method = 'linear', inplace = True)
 
     #Set training (first 65%), validation (next 25%) and test (last 10%) sets
@@ -40,7 +48,7 @@ def load_catchment(catchment_name):
     
     inputs = np.stack([data_in[col].to_numpy() for col in feature_cols], axis =1)    
 
-    #Apply log1p transformation to skewed inputs 
+    #Apply log1p transformation to skewed inputs (precip, Etp)
     #see histograms of raw input data created in Script A
     log_cols = [0, 1, 2, 3]
     for col in log_cols: 
@@ -51,6 +59,7 @@ def load_catchment(catchment_name):
 
     return{
         'name': catchment_name,
+        'static': static,   #shape: (6,)
         'inputs_train': inputs[:,:index_validation,:],
         'inputs_val': inputs[:,index_validation:index_test,:],
         'inputs_test' : inputs[:,index_test:,:],

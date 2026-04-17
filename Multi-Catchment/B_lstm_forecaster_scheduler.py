@@ -40,51 +40,59 @@ for c in catchment_data:
     c['labels_val'], _ = scale_series(c['labels_val'], labelscales)
     c['labels_test'], _ = scale_series(c['labels_test'], labelscales)
 
+#Scale static attributes 
+all_static = torch.stack([c['static'] for c in catchment_data]) #(6,6)
+static_mean = all_static.mean(dim = 0)
+static_std = all_static.std(dim = 0)
+for c in catchment_data: 
+    c['static_scaled'] = (c['static'] - static_mean) / static_std
+
 #################################################################
 #Step 1: Learning Rate Search 
 #Test a range of learning rates with 10 epochs each 
 #Need to comment this section out after range has been found 
 #################################################################
-# learning_rates = [1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2]
-# final_losses = []
+learning_rates = [1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2]
+final_losses = []
+n_static = 6
 
-# for lr in learning_rates: 
-#     # Create model object. The model architecture is defined in model.py
-#     model = LSTMModel(ninputs, nhidden, 1, nlayers, 0)
-#     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+for lr in learning_rates: 
+    # Create model object. The model architecture is defined in model.py
+    model = LSTMModel(ninputs, nhidden, 1, nlayers, 0.2, n_static = n_static)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-#     for epoch in range(10):
-#         #put model into training mode and reset gradients 
-#         model.train()
-#         #Initialize optimizer
-#         optimizer.zero_grad()
-#         total_loss = 0.0
+    for epoch in range(10):
+         #put model into training mode and reset gradients 
+        model.train()
+         #Initialize optimizer
+        optimizer.zero_grad()
+        total_loss = 0.0
 
-#         for c in catchment_data: 
-#             pred = model(c['inputs_train'])
-#             loss = mse(pred[:, index_warmup:], c['labels_train'][:, index_warmup:])
-#             total_loss += loss 
-#         avg_loss = total_loss / len(catchment_data)
-#         avg_loss.backward()
-#         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-#         optimizer.step()
+        for c in catchment_data: 
+            pred = model(c['inputs_train'], c['static_scaled'].unsqueeze(0))
+            loss = mse(pred[:, index_warmup:], c['labels_train'][:, index_warmup:])
+            total_loss += loss 
+        avg_loss = total_loss / len(catchment_data)
+        avg_loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
     
-#     final_losses.append(avg_loss.item())
-#     print(f'LR = {lr:.0e}: final loss = {avg_loss.item():.4f}')
+    final_losses.append(avg_loss.item())
+    print(f'LR = {lr:.0e}: final loss = {avg_loss.item():.4f}')
 
 # #Plot learning rate search 
-# fig, ax = plt.subplots()
-# ax.plot(learning_rates, final_losses, marker='o')
-# ax.set_xscale('log')
-# ax.set_xlabel('Learning Rate')
-# ax.set_ylabel('Training Loss (after 10 epochs)')
-# ax.set_title('Learning Rate Search')
-# fig.savefig(os.path.join(figures_dir, 'lr_search.png'), dpi=150)
-# plt.show()
+fig, ax = plt.subplots()
+ax.plot(learning_rates, final_losses, marker='o')
+ax.set_xscale('log')
+ax.set_xlabel('Learning Rate')
+ax.set_ylabel('Training Loss (after 10 epochs)')
+ax.set_title('Learning Rate Search')
+fig.savefig(os.path.join(figures_dir, 'lr_search.png'), dpi=150)
+plt.show()
 
 #################################################################
 #Step 2: Train with CyclicLR Scheduler 
-model = LSTMModel(ninputs, nhidden, 1, nlayers, 0.2)
+model = LSTMModel(ninputs, nhidden, 1, nlayers, 0.2, n_static = n_static)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
 # Triangular cyclical learning rate scheduler.
@@ -113,7 +121,7 @@ for epoch in range(epochs):
     
     total_train_loss = 0.0 
     for c in catchment_data:
-        pred = model(c['inputs_train'])
+        pred = model(c['inputs_train'], c['static_scaled'].unsqueeze(0))
         loss = mse(pred[:, index_warmup:], c['labels_train'][:, index_warmup:])
         total_train_loss += loss
 
@@ -139,7 +147,7 @@ for epoch in range(epochs):
     with torch.no_grad():
         for c in catchment_data: 
             inputs_trainval = torch.cat([c['inputs_train'], c['inputs_val']], dim=1)
-            pred_trainval = model(inputs_trainval)
+            pred_trainval = model(inputs_trainval, c['static_scaled'].unsqueeze(0))
             pred_val = pred_trainval[:, c['inputs_train'].shape[1]:]
             total_val_loss += mse(pred_val, c['labels_val']).item()
 

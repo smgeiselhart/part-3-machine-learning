@@ -23,6 +23,9 @@ nlayers = 1
 #Load all catchments 
 catchment_data = [load_catchment(c) for c in catchments]
 
+#Set number of static inputs 
+n_static = 6
+
 #Compute global scaling from all training data (must match training data)
 all_inputs_train = torch.cat([c['inputs_train'] for c in catchment_data], dim=1)
 all_labels_train = torch.cat([c['labels_train'] for c in catchment_data], dim=1)
@@ -38,8 +41,15 @@ for c in catchment_data:
     c['labels_val'], _ = scale_series(c['labels_val'], labelscales)
     c['labels_test'], _ = scale_series(c['labels_test'], labelscales)
 
+#Scale the static attributes used as input  
+all_static = torch.stack([c['static'] for c in catchment_data])
+static_mean = all_static.mean(dim=0)
+static_std = all_static.std(dim=0)
+for c in catchment_data:
+    c['static_scaled'] = (c['static'] - static_mean) / static_std
+
 #Load the trained model (done in B script)
-model = LSTMModel(ninputs,nhidden,1,nlayers,0)
+model = LSTMModel(ninputs,nhidden,1,nlayers,0, n_static = n_static)
 model.load_state_dict(torch.load('weights_scheduler.csv'))
 model.eval()
 
@@ -54,7 +64,7 @@ for c in catchment_data:
 
     #Run model on full sequence 
     with torch.no_grad():
-        pred_all = model(inputs_all)
+        pred_all = model(inputs_all, c['static_scaled'].unsqueeze(0))
 
     #Slice predictions into each dataset 
     n_train = c['inputs_train'].shape[1]
