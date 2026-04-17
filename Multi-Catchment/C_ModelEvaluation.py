@@ -1,7 +1,8 @@
 #This script recreates the model from the saved parameters 
 #Plots predictions for an independent series and calculates metrics 
 
-from B_lstm_forecaster import load_datafile, scale_series, unscale_series, nse, mse
+from B_lstm_forecaster import load_catchment, scale_series, unscale_series, nse, mse
+from B_lstm_forecaster import catchments, datafolder, feature_cols
 from model import LSTMModel
 import torch
 import numpy as np
@@ -15,146 +16,154 @@ figures_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures'
 os.makedirs(figures_dir, exist_ok=True)
 
 #Hyperparameters - these MUST match training 
-ninputs = 9
+ninputs = len(feature_cols)
 nhidden = 64
 nlayers = 1
 
-#Load and scale data 
-inputs_train,inputs_val,inputs_test,labels_train,labels_val,labels_test, index_validation = load_datafile('Data/LSTM_dataframe.csv')
-inputs_train,inputscales = scale_series(inputs_train)
-labels_train,labelscales = scale_series(labels_train)
-inputs_val,inputscales = scale_series(inputs_val,inputscales)
-labels_val,labelscales = scale_series(labels_val,labelscales)
-inputs_test,inputscales = scale_series(inputs_test,inputscales)
-labels_test,labelscales = scale_series(labels_test,labelscales)
+#Load all catchments 
+catchment_data = [load_catchment(c) for c in catchments]
 
-#Join all datasets (train, val, test) back together to ensure all get a warmup period
-inputs_all = torch.cat([inputs_train, inputs_val, inputs_test], dim=1)
-labels_all = torch.cat([labels_train, labels_val, labels_test], dim=1)
+#Compute global scaling from all training data (must match training data)
+all_inputs_train = torch.cat([c['inputs_train'] for c in catchment_data], dim=1)
+all_labels_train = torch.cat([c['labels_train'] for c in catchment_data], dim=1)
+_, inputscales = scale_series(all_inputs_train)
+_, labelscales = scale_series(all_labels_train)
 
-#Run model on the full sequence
+#Scale each catchment 
+for c in catchment_data:
+    c['inputs_train'], _ = scale_series(c['inputs_train'], inputscales)
+    c['inputs_val'], _ = scale_series(c['inputs_val'], inputscales)
+    c['inputs_test'], _ = scale_series(c['inputs_test'], inputscales)
+    c['labels_train'], _ = scale_series(c['labels_train'], labelscales)
+    c['labels_val'], _ = scale_series(c['labels_val'], labelscales)
+    c['labels_test'], _ = scale_series(c['labels_test'], labelscales)
+
+#Load the trained model (done in B script)
 model = LSTMModel(ninputs,nhidden,1,nlayers,0)
-model.load_state_dict(torch.load('weights.csv'))
+model.load_state_dict(torch.load('weights_scheduler.csv'))
 model.eval()
-with torch.no_grad():
-    pred_all = model(inputs_all)
 
-#Slice predictions into each dataset 
-n_train = inputs_train.shape[1]
-n_val = inputs_val.shape[1]
-n_test = inputs_test.shape[1]
+#Evaluate each catchment
+for c in catchment_data: 
+    name = c['name']
+    print(f'\n=== {name} ===')
 
-pred_train = pred_all[:, :n_train]
-pred_val = pred_all[:, n_train:n_train+n_val]
-pred_test = pred_all[:, n_train+n_val:]
+    #Join all datasets back together to ensure all get a warm up period 
+    inputs_all = torch.cat([c['inputs_train'], c['inputs_val'], c['inputs_test']], dim = 1)
+    labels_all = torch.cat([c['labels_train'], c['labels_val'], c['labels_test']], dim = 1)
 
-#Unscale output
-#training
-rainseries_train = unscale_series(inputs_train[0,:,0],inputscales).numpy()
-flowpred_train = unscale_series(pred_train[0,:],labelscales).numpy()
-flowobs_train = unscale_series(labels_train[0,:],labelscales).numpy()
+    #Run model on full sequence 
+    with torch.no_grad():
+        pred_all = model(inputs_all)
 
-#Validation 
-rainseries_val = unscale_series(inputs_val[0,:,0],inputscales).numpy()
-flowpred_val = unscale_series(pred_val[0,:],labelscales).numpy()
-flowobs_val = unscale_series(labels_val[0,:],labelscales).numpy()
+    #Slice predictions into each dataset 
+    n_train = c['inputs_train'].shape[1]
+    n_val = c['inputs_val'].shape[1]
 
-#Test 
-rainseries_test = unscale_series(inputs_test[0,:,0],inputscales).numpy()
-flowpred_test = unscale_series(pred_test[0,:],labelscales).numpy()
-flowobs_test = unscale_series(labels_test[0,:],labelscales).numpy()
+    pred_train = pred_all[:, :n_train]
+    pred_val = pred_all[:, n_train:n_train+n_val]
+    pred_test = pred_all[:, n_train+n_val:]
 
-#Save predictions to be used in Diebold Mariano Test (separate script)
-np.save('predictions_val.npy', flowpred_val)
-np.save('observations_val.npy', flowobs_val)
+    #Unscale output
+    #training
+    flowpred_train = unscale_series(pred_train[0,:],labelscales).numpy()
+    flowobs_train = unscale_series(c['labels_train'][0,:],labelscales).numpy()
+    rainseries_train = unscale_series(c['inputs_train'][0,:,0], inputscales).numpy()
 
-######### EVALUATION ###########
-#Calculate the NSE on training 
-nse_train = nse(flowobs_train, flowpred_train)
-print(f'Training NSE: {nse_train:3f}')
+    #Validation 
+    flowpred_val = unscale_series(pred_val[0,:],labelscales).numpy()
+    flowobs_val = unscale_series(c['labels_val'][0,:],labelscales).numpy()
+    rainseries_val = unscale_series(c['inputs_val'][0,:,0], inputscales).numpy()
 
-#PLot training predictions
-fig,ax = plt.subplots(nrows=2)
-ax[0].plot(rainseries_train)
-ax[0].set_ylabel('Rainfall [mm/d]')
-ax[0].set_title(f'Training period (NSE = {nse_train:.3f})')
-ax[1].plot(flowobs_train, label='Observed')
-ax[1].plot(flowpred_train, label='Predicted')
-ax[1].set_ylabel('Flow [mm/d]')
-ax[1].set_xlabel('Time [days]')
-ax[1].legend()
-fig.savefig(os.path.join(figures_dir, 'lstm_training_predictions.png'), dpi=150)
 
-#Calculate NSE on validation set, 1 = perfect, 0 = no better than predicting the mean
-nse_val = nse(flowobs_val, flowpred_val)
-print(f'Validation NSE: {nse_val:3f}')
+    #Test 
+    flowpred_test = unscale_series(pred_test[0,:],labelscales).numpy()
+    flowobs_test = unscale_series(c['labels_test'][0,:],labelscales).numpy()
+    rainseries_test = unscale_series(c['inputs_test'][0,:,0], inputscales).numpy()
 
-#PLot Validation predictions 
-fig,ax = plt.subplots(nrows=2)
-ax[0].plot(rainseries_val)
-ax[0].set_ylabel('Rainfall [mm/d]')
-ax[0].set_title(f'Validation period (NSE = {nse_val:.3f})')
-ax[1].plot(flowobs_val, label='Observed')
-ax[1].plot(flowpred_val, label='Predicted')
-ax[1].set_ylabel('Flow [mm/d]')
-ax[1].set_xlabel('Time [days]')
-ax[1].legend()
-fig.savefig(os.path.join(figures_dir, 'lstm_validation_predictions.png'), dpi=150)
 
-#Calcualte NSE on test period 
-nse_test = nse(flowobs_test, flowpred_test)
-print(f'Test NSE: {nse_test:.3f}')
+    ######### EVALUATION ###########
+    #Calculate the NSE on training 
+    nse_train = nse(flowobs_train, flowpred_train)
+    print(f'Training NSE: {nse_train:3f}')
 
-#Plot Test Predictions 
-fig,ax = plt.subplots(nrows=2)
-ax[0].plot(rainseries_test)
-ax[0].set_ylabel('Rainfall [mm/d]')
-ax[0].set_title(f'Test period (NSE = {nse_test:.3f})')
-ax[1].plot(flowobs_test, label='Observed')
-ax[1].plot(flowpred_test, label='Predicted')
-ax[1].set_ylabel('Flow [mm/d]')
-ax[1].set_xlabel('Time [days]')
-ax[1].legend()
-fig.savefig(os.path.join(figures_dir, 'lstm_test_predictions.png'), dpi=150)
+    #PLot training predictions
+    fig,ax = plt.subplots(nrows=2)
+    ax[0].plot(rainseries_train)
+    ax[0].set_ylabel('Rainfall [mm/d]')
+    ax[0].set_title(f'{name} - Training (NSE = {nse_train:.3f})')
+    ax[1].plot(flowobs_train, label='Observed')
+    ax[1].plot(flowpred_train, label='Predicted')
+    ax[1].set_ylabel('Flow [mm/d]')
+    ax[1].set_xlabel('Time [days]')
+    ax[1].legend()
+    fig.savefig(os.path.join(figures_dir, f'{name}_training_predictions.png'), dpi=150)
+    plt.close()
 
-#Check Residuals 
-#Plot histogram of residuals on validation period to confirm if normally distributed
-residuals = flowobs_val - flowpred_val
-fig, ax = plt.subplots()
-ax.hist(residuals, bins=50)
-ax.axvline(0, color='red', linestyle='--', label='Zero')
-ax.set_xlabel('Residual [mm/d]')
-ax.set_ylabel('No. of occurences')
-ax.legend()
-fig.savefig(os.path.join(figures_dir, 'Histogram_residuals.png'), dpi=150)
+    #Calculate NSE on validation set, 1 = perfect, 0 = no better than predicting the mean
+    nse_val = nse(flowobs_val, flowpred_val)
+    print(f'Validation NSE: {nse_val:3f}')
 
-#Plot residuals over time to check for white noise
-fig, ax = plt.subplots()
-ax.plot(residuals, color = 'steelblue', linewidth = 0.5)
-ax.axhline(0, color = 'red', linestyle = '--', linewidth =1)
-ax.set_xlabel('Time [days]')
-ax.set_ylabel('Residual [mm/d]')
-ax.set_title('Residuals over time')
-fig.savefig(os.path.join(figures_dir, 'Residuals_timeseries.png'), dpi=150)
+    #PLot Validation predictions 
+    fig,ax = plt.subplots(nrows=2, figsize = (12, 6))
+    ax[0].plot(rainseries_val, linewidth = 0.5)
+    ax[0].set_ylabel('Rainfall [mm/d]')
+    ax[0].set_title(f'{name} - Validation (NSE = {nse_val:.3f})')
+    ax[1].plot(flowobs_val, label='Observed')
+    ax[1].plot(flowpred_val, label='Predicted')
+    ax[1].set_ylabel('Flow [mm/d]')
+    ax[1].set_xlabel('Time [days]')
+    ax[1].legend()
+    fig.savefig(os.path.join(figures_dir, f'{name}_validation_predictions.png'), dpi=150)
+    plt.close()
 
-#PLot autocorrelation function 
-fig, ax = plt.subplots()
-plot_acf(residuals, lags=60, ax=ax)
-ax.set_xlabel('Lag [days]')
-ax.set_ylabel('Autocorrelation')
-ax.set_title('ACF of residuals')
-fig.savefig(os.path.join(figures_dir, 'residuals_acf.png'), dpi=150)
+    #Calcualte NSE on test period 
+    nse_test = nse(flowobs_test, flowpred_test)
+    print(f'Test NSE: {nse_test:.3f}')
 
-#Create box & whisker plot of features 
-data_bw = inputs_train.squeeze(0).numpy() #shape = (timesteps, 8)
-var_names = ['precip', 'ETp', 'precip_30d', 'precip_7d', 'precip_90d', 'precip_surplus', 'temp', 'groundwater', 'melt']
-fig, ax = plt.subplots(figsize = (10,5))
-bp = ax.boxplot(data_bw, tick_labels = var_names, patch_artist = True, showfliers = True)
-colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728','#9467bd', '#8c564b', '#e377c2', '#7f7f7f','#17becf']
-for patch, color in zip(bp['boxes'], colors):
-    patch.set_facecolor(color)
-fig.savefig(os.path.join(figures_dir, 'boxandwhisker.png'), dpi=150)
+    #Plot Test Predictions 
+    fig,ax = plt.subplots(nrows=2, figsize = (12, 6))
+    ax[0].plot(rainseries_test, linewidth = 0.5)
+    ax[0].set_ylabel('Rainfall [mm/d]')
+    ax[0].set_title(f'{name} - Test (NSE = {nse_test:.3f})')
+    ax[1].plot(flowobs_test, label='Observed')
+    ax[1].plot(flowpred_test, label='Predicted')
+    ax[1].set_ylabel('Flow [mm/d]')
+    ax[1].set_xlabel('Time [days]')
+    ax[1].legend()
+    fig.savefig(os.path.join(figures_dir, f'{name}_test_predictions.png'), dpi=150)
+    plt.close()
 
-plt.show()
+    #Check Residuals 
+    #Plot histogram of residuals on validation period to confirm if normally distributed
+    residuals = flowobs_val - flowpred_val
+    fig, ax = plt.subplots()
+    ax.hist(residuals, bins=50)
+    ax.axvline(0, color='red', linestyle='--', label='Zero')
+    ax.set_xlabel('Residual [mm/d]')
+    ax.set_ylabel('No. of occurences')
+    ax.set_title(f'{name} - Residual Histogram')
+    ax.legend()
+    fig.savefig(os.path.join(figures_dir, f'{name}_residuals_histogram.png'), dpi=150)
+    plt.close()
+
+    #Plot residuals over time to check for white noise
+    fig, ax = plt.subplots()
+    ax.plot(residuals, color = 'steelblue', linewidth = 0.5)
+    ax.axhline(0, color = 'red', linestyle = '--', linewidth =1)
+    ax.set_xlabel('Time [days]')
+    ax.set_ylabel('Residual [mm/d]')
+    ax.set_title('Residuals over time')
+    fig.savefig(os.path.join(figures_dir, f'{name}_Residuals_timeseries.png'), dpi=150)
+    plt.close()
+
+    #PLot autocorrelation function 
+    fig, ax = plt.subplots()
+    plot_acf(residuals, lags=60, ax=ax)
+    ax.set_xlabel('Lag [days]')
+    ax.set_ylabel('Autocorrelation')
+    ax.set_title(f'{name} - ACF of Residuals')
+    fig.savefig(os.path.join(figures_dir, f'{name}_residuals_acf.png'), dpi=150)
+    plt.close()
 
 

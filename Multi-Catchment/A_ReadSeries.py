@@ -4,75 +4,84 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt 
 
+#Create Data and Figure folder 
 datafolder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Data')
+figurefolder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Figures')
 
-#####################
-#read daily_means file (date, discharge, precip, ETP)
-df_daily = pd.read_csv(os.path.join(datafolder,'daily_means.csv'),sep=';', index_col = 0, parse_dates = True)
+#List of all catchment folders 
+catchments = ['Group1', 'Group2','Group3','Group5','Group7','Group11']
 
-#read CSV12H_Clean file (12h date, temp, humid, wind, radia, etc.)
-#reading this in to get the temp column to use to determine if snow is melting 
-df_12h = pd.read_csv(os.path.join(datafolder, 'CSV12H_Clean.csv'), sep =',', index_col = 0, parse_dates = True)
+#Standard column names to use across all catchments 
+standard_cols = ['discharge', 'precipitation', 'ETp']
 
-#extract temp column only and resample to daily means 
-temp_daily = df_12h[['temp']].resample('D').mean()
+for catchment in catchments:
+    filepath = os.path.join(datafolder, catchment, 'daily_means.csv')
 
-#read groundwater.csv from HIP model to include as an input 
-df_groundwater = pd.read_csv(os.path.join(datafolder, 'groundwater.csv'), sep = ';', index_col = 0, parse_dates = True, decimal = ',')
-groundwater_daily = df_groundwater.resample('D').mean()
+    #####################
+    #read CSV file - first try semicolon, then try comma (one group has commas)
+    try:    
+        df = pd.read_csv(filepath, sep = ';', index_col = 0, parse_dates = True, date_format = '%Y-%m-%d')
+        if len(df.columns) < 2: #Meaning the semicolon didn't split properly 
+            df = pd.read_csv(filepath, sep = ',', index_col = 0, parse_dates = True, date_format = '%Y-%m-%d')
+    except: 
+        df = pd.read_csv(filepath, sep = ',', index_col = 0, parse_dates = True, date_format = '%Y-%m-%d')
 
-#join daily_means data, temp data, and groundwater data to one dataframe 
-data_all_daily = df_daily.join(temp_daily)
-data_all_daily = data_all_daily.join(groundwater_daily)
+    #####################
+    #Normalize column names to discharge, precipitation, ETp (some are capitalized differently)
+    rename_map = {}
 
-#Add columns with rolling mean of precipitation 
-#this captures how wet the catchment was in the past 
-#Starting with 30-day 
-data_all_daily['precip_30d'] = data_all_daily['precipitation'].rolling(window = 30, min_periods = 1, center = True).mean()
+    for col in df.columns: 
+        if col.lower() == 'etp':
+            rename_map[col] = 'ETp'
+        elif col.lower() == 'discharge': 
+            rename_map[col] = 'discharge'
+        elif col.lower() == 'precipitation':
+            rename_map[col] = 'precipitation'
+    df.rename(columns = rename_map, inplace = True)
 
-#Adding 7-day window 
-data_all_daily['precip_7d'] = data_all_daily['precipitation'].rolling(window = 7, min_periods = 1, center = True).mean()
+    #Keep only the three standard columns (some datasets have temp)
+    df = df[standard_cols]
 
-#Adding 90-day window 
-data_all_daily['precip_90d'] = data_all_daily['precipitation'].rolling(window = 90, min_periods = 1, center = True).mean()
+    #####################
+    #Additional features to include based on precip and ETP 
+    #7-day rolling mean 
+    df['precip_7d'] = df['precipitation'].rolling(window = 7, min_periods = 1, center = True).mean()
 
-#Add column with daily surplus = how much water is added vs lost each day 
-#helps clarify relationship between precip and ETP, which can get confusing 
-#positive = wetter conditions, negative = drying out
-data_all_daily['precip_surplus'] = data_all_daily['precipitation'] - data_all_daily['ETp']
+    #30-day rolling mean 
+    df['precip_30d'] = df['precipitation'].rolling(window = 30, min_periods = 1, center = True).mean()
 
-#Add column with a binary melt indicator to account for snow melt 
-#if temp is above freezing: 1 (melting possible), if below: 0
-data_all_daily['melt'] = (data_all_daily['temp'] > 0).astype(float)
+    #Daily surplus = precip - ETP (net water balance)
+    df['precip_surplus'] = df['precipitation'] - df['ETp']
 
-#Save new data to a csv file in "data" folder 
-data_all_daily.to_csv('data/LSTM_dataframe.csv', sep = ',')
+    #####################
+    #Save the dataframes 
+    df.to_csv((os.path.join(datafolder, catchment, 'LSTM_dataframe.csv')), sep = ',')
 
-#Plot timeseries of inputs 
-fig, axes = plt.subplots(nrows = 7, figsize = (12, 10), sharex = True)
-features = ['precipitation', 'ETp', 'precip_30d', 'precip_surplus', 'temp', 'groundwater', 'melt']
-ylabels = ['Precip [mm/d]', 'ETp [mm/d]', '30d mean [mm/d]', 'Surplus [mm/d]', 'Temp [C]', 'GW level [m]', 'Melt [0/1]']
+    #####################
+    #Plot a timeseries of  input data and discharge, 1 figure per catchment 
+    features = ['discharge','precipitation', 'ETp', 'precip_7d', 'precip_30d', 'precip_surplus']
+    ylabels = ['Discahrge [mm/d]','Precip [mm/d]', 'ETP [mm/d]', '7d mean [mm/d]', '30d mean [mm/d]', 'Precip Surplus [mm/d]']
 
-for i, (feat, label) in enumerate(zip(features, ylabels)): 
-    axes[i].plot(data_all_daily.index, data_all_daily[feat], linewidth = 0.5)
-    axes[i].set_ylabel(label)
+    fig, axes = plt.subplots(nrows=len(features), figsize=(12, 10), sharex=True)
+    for i, (feat, label) in enumerate(zip(features, ylabels)):
+        axes[i].plot(df.index, df[feat], linewidth=0.5)
+        axes[i].set_ylabel(label)
+    axes[-1].set_xlabel('Date')
+    fig.suptitle(f'{catchment} - Data Overview')
+    plt.tight_layout()
+    plt.savefig(os.path.join(figurefolder, f'{catchment}_data_overview.png'), dpi=150)
+    plt.close()
 
-axes[-1].set_xlabel('Date')
-fig.suptitle('Input features over time')
-plt.tight_layout()
-plt.savefig('figures/input_features.png', dpi = 150)
+    #####################
+    #Plot histograms of all inputs to check skewness
+    fig, axes = plt.subplots(nrows=1, ncols=len(features), figsize=(20, 4))
+    for i, feat in enumerate(features):
+        axes[i].hist(df[feat].dropna(), bins=50)
+        axes[i].set_title(feat)
+    axes[0].set_ylabel('Frequency')
+    fig.suptitle(f'{catchment} - Raw Input Distributions')
+    fig.tight_layout()
+    plt.savefig(os.path.join(figurefolder, f'{catchment}_rawdata_histograms.png'), dpi=150)
+    plt.close()
 
-#Plot histogram of all raw inputs
-#Generally want inuts to be normally distributed
-#Will be log transformed in Script B if needed 
-var_names = ['precipitation', 'ETp', 'precip_30d', 'precip_7d', 'precip_90d', 'precip_surplus', 'temp','groundwater', 'melt']
-fig, axes = plt.subplots(nrows = 1, ncols = 9, figsize = (24,4))
-for i, name in enumerate(var_names):
-    axes[i].hist(data_all_daily[name].dropna(), bins = 50)
-    axes[i].set_title(name)
-axes[0].set_ylabel('Frequency')
-fig.suptitle('Raw Input Distributions')
-fig.tight_layout()
-plt.savefig('figures/rawdata_histograms.png', dpi = 150)
-
-plt.show()
+    

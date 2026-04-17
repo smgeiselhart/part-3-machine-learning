@@ -16,11 +16,19 @@ from model import LSTMModel
 #torch.manual_seed(42)
 #np.random.seed(42)
 
-#Function that loads the datafile
-#Returns training and validation inputs and labels
-#Also returns the index where validation period starts (at 65% through dataset)
-#Also interpolates any NaN values to avoid corrupting model. Loss is not computed on these. 
-def load_datafile(datafile):
+catchments = ['Group1', 'Group2', 'Group3', 'Group5', 'Group7', 'Group11']
+datafolder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Data')
+
+#Feature columns to use as inputs 
+feature_cols = ['precipitation', 'ETp', 'precip_7d', 'precip_30d', 'precip_surplus']
+
+#Reads LSTM_dataframe csv for each catchment, interpolates NaN values 
+#Stacks the feature columns into an input tensor and extracts discharge as the label tensor 
+#Splits into train (65%), val (25%), and test (10%)
+def load_catchment(catchment_name):
+    
+    #Load one catchment's dataframe and split it into train/val/test sets
+    datafile = os.path.join(datafolder, catchment_name, 'LSTM_dataframe.csv')
     data_in=pd.read_csv(datafile, sep=',', index_col = 0, parse_dates = True)
    
     #Interpolate all NaN values 
@@ -29,43 +37,26 @@ def load_datafile(datafile):
     #Set training (first 65%), validation (next 25%) and test (last 10%) sets
     index_validation = int(len(data_in) * 0.65)
     index_test = int(len(data_in) * 0.90)
-
-    inputs = np.stack([data_in['precipitation'].to_numpy(), 
-                       data_in['ETp'].to_numpy(),
-                       data_in['precip_30d'].to_numpy(), 
-                       data_in['precip_7d'].to_numpy(),
-                       data_in['precip_90d'].to_numpy(),
-                       data_in['precip_surplus'].to_numpy(),
-                       data_in['temp'].to_numpy(), 
-                       data_in['groundwater'].to_numpy(),
-                       data_in['melt'].to_numpy()], 
-                       axis =1)    
     
+    inputs = np.stack([data_in[col].to_numpy() for col in feature_cols], axis =1)    
+
     #Apply log1p transformation to skewed inputs 
     #see histograms of raw input data created in Script A
-    log_cols = [0, 1, 2, 3, 4]
+    log_cols = [0, 1, 2, 3]
     for col in log_cols: 
         inputs[:, col] = np.log1p(inputs[:, col])
 
-    # inputs = np.stack([data_in['rain'].to_numpy(),rain_month.to_numpy(),rain_3month.to_numpy()],axis=1)    
-    inputs = torch.tensor(inputs,dtype=torch.float32)
-    
-    labels = torch.tensor(data_in['discharge'].to_numpy(), dtype=torch.float32)
-   
-    #add batch dimension
-    inputs = inputs.unsqueeze(0)
-   
-    #labels can have batch dimension, we don't need feature dimension
-    labels = labels.unsqueeze(0)
-    
+    inputs = torch.tensor(inputs,dtype=torch.float32).unsqueeze(0)  #(1, T, F)
+    labels = torch.tensor(data_in['discharge'].to_numpy(), dtype=torch.float32).unsqueeze(0) #(1, T)
 
-    inputs_train = inputs[:,:index_validation,:]
-    inputs_val = inputs[:,index_validation:index_test,:]
-    inputs_test = inputs[:,index_test:,:]
-    labels_train = labels[:,:index_validation]
-    labels_val = labels[:,index_validation:index_test]
-    labels_test = labels[:,index_test:]
-    return(inputs_train,inputs_val,inputs_test,labels_train,labels_val, labels_test,index_validation)
+    return{
+        'name': catchment_name,
+        'inputs_train': inputs[:,:index_validation,:],
+        'inputs_val': inputs[:,index_validation:index_test,:],
+        'inputs_test' : inputs[:,index_test:,:],
+        'labels_train' : labels[:,:index_validation],
+        'labels_val' : labels[:,index_validation:index_test],
+        'labels_test' : labels[:,index_test:]}
     
 def scale_series(data,zscale=None):
     if not zscale:
@@ -88,53 +79,47 @@ def mse(pred,label):
 def nse(obs,pred):
     mask = ~np.isnan(obs)
     obs, pred = obs[mask], pred[mask]
-    return 1 - np.sum((obs - pred)**2) / np.sum((obs - np.mean(obs))**2)
+    nse = 1 - np.sum((obs - pred)**2) / np.sum((obs - np.mean(obs))**2)
+    return(nse)
 
-#Wrapping in if statement so this doesn't run when imported to C script 
+#Wrapping in if statement so this doesn't run when imported to Cross Valid 
 if __name__ == '__main__':
     #################################################################
     #define time periods number of epochs to train and LSTM hyperparameters
-    #index where validation starts computed in load_datafile function
+    #index where validation starts computed in load_catchment function
     index_warmup = 182 #time step index where warm up period ends (6 mo)
-    #
-    epochs = 1000
-    #
-    ninputs = 9 #no. of input variables
+    
+    epochs = 200 #Starting low to make sure it runs 
+    ninputs = len(feature_cols) #no. of input variables
     nhidden = 64 #no. of hidden states, i.e. "parallel" LSTM cells
     nlayers = 1 #no. of LSTM layers, i.e. LSTM cells in sequence
     
     #################################################################
-    #load the input data, see script A for details on creation of this file 
-    inputs_train,inputs_val,inputs_test,labels_train,labels_val,labels_test,index_validation = load_datafile('Data/LSTM_dataframe.csv')
-
-    #Plot histograms of log transformed inputs 
-    var_names = ['precipitation', 'ETp', 'precip_30d', 'precip_7d', 'precip_90d']
-    fig, axes = plt.subplots(nrows = 1, ncols = 5, figsize = (16,6))
-    for i, name in enumerate(var_names):
-        axes[i].hist(inputs_train[0, :, i].numpy(), bins = 50)
-        axes[i].set_title(name)
-    axes[0].set_ylabel('Frequency')
-    fig.suptitle('Log Transformed Input Distributions')
-    fig.tight_layout()
-    plt.savefig('figures/transformed_inputs_hist.png', dpi = 150)
+    #load all catchments 
+    catchment_data = [load_catchment(c) for c in catchments]
     
     #################################################################
     #Scale data. For machine learning models, inputs and labels should be scaled. The scaling values should be computed on the training data only
-    inputs_train,inputscales = scale_series(inputs_train)
-    labels_train,labelscales = scale_series(labels_train)
+    #Compute global scaling from ALL training data (model sees all catchments on same scale)
+    all_inputs_train = torch.cat([c['inputs_train'] for c in catchment_data], dim = 1)
+    all_labels_train = torch.cat([c['labels_train'] for c in catchment_data], dim = 1)
 
-    #for the validation data we provide the scaling values as input
-    inputs_val,inputscales = scale_series(inputs_val,inputscales)
-    labels_val,labelscales = scale_series(labels_val,labelscales)
+    _, inputscales = scale_series(all_inputs_train)
+    _, labelscales = scale_series(all_labels_train)
 
-    #Same for the test data 
-    inputs_test,inputscales = scale_series(inputs_test,inputscales)
-    labels_test,labelscales = scale_series(labels_test,labelscales)
+    #Scale each catchment using the global stats 
+    for c in catchment_data:
+        c['inputs_train'], _ = scale_series(c['inputs_train'], inputscales)
+        c['inputs_val'], _ = scale_series(c['inputs_val'], inputscales)
+        c['inputs_test'], _ = scale_series(c['inputs_test'], inputscales)
+        c['labels_train'], _ = scale_series(c['labels_train'], labelscales)
+        c['labels_val'], _ = scale_series(c['labels_val'], labelscales)
+        c['labels_test'], _ = scale_series(c['labels_test'], labelscales)
 
     #################################################################
     #Create model object. The model architecture is defined in model.py
-    #Added dropout of 20% (last value here) 
-    model = LSTMModel(ninputs,nhidden,1,nlayers,0.2)
+    #Last value here shows the dropout rate (%)
+    model = LSTMModel(ninputs,nhidden,1,nlayers,0)
 
     #################################################################
     #Initialize optimizer
@@ -142,46 +127,65 @@ if __name__ == '__main__':
 
     #initialize best validation loss and training history
     best_val_loss = torch.tensor(float('inf'),dtype=torch.float32)
-    history = {'train_loss': np.array([]),'val_loss': np.array([])}
+    history = {'train_loss': [],'val_loss': []}
 
-    #set number of timesteps in the training set 
-    #Using this to use as a warm up for the validaiton period 
-    n_train = inputs_train.shape[1]
-
-    #now train the model
+    #train the model
     for epoch in range(epochs):
-        print(epoch)
+       
         #put model into training mode and reset gradients
         model.train() #in ML models you can include options that should only happen during training - e.g. randomly resetting some of the parameters to reduce overfitting (dropout)
         optimizer.zero_grad()
+        
         #predict the flow series and compute MSE, excluding the warm up period
-        pred_train = model(inputs_train)
-        loss_train = mse(pred_train[:,index_warmup:],labels_train[:,index_warmup:])
-        #Perform backpropagation to compute gradients of loss function with respect to weights of the neural network
-        loss_train.backward()
+        #Accumulate the loss across all catchments
+        total_train_loss = 0.0
+        for c in catchment_data:
+            pred = model(c['inputs_train'])
+            loss = mse(pred[:,index_warmup:],c['labels_train'][:,index_warmup:])
+            total_train_loss = total_train_loss + loss
+        
+        #Average loss across all catchments, then backpropogation 
+        avg_train_loss = total_train_loss / len(catchment_data)
+        avg_train_loss.backward()
+
         #Cap the gradient magnitude to prevent large steps from being taken 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+       
         #Update weights
         optimizer.step()
+       
         #save training loss
-        history['train_loss'] = np.append(history['train_loss'],loss_train.detach().cpu().numpy())
+        history['train_loss'].append(avg_train_loss.item())
+        
         #put model into evaluation model, i.e. features like dropout will be inactive because we now want to generate the best possible prediciton
+        #Run model on validation period 
         model.eval()
+       
         #predict the validation series, using the training series as warm up 
+        total_val_loss = 0
+
         with torch.no_grad():
-            inputs_trainval = torch.cat([inputs_train, inputs_val], dim=1)
-            pred_trainval = model(inputs_trainval)
-            pred_val = pred_trainval[:, n_train:]
-            loss_validation = mse(pred_val, labels_val) 
+            for c in catchment_data: 
+                inputs_trainval = torch.cat([c['inputs_train'], c['inputs_val']], dim=1)
+                pred_trainval = model(inputs_trainval)
+                pred_val = pred_trainval[:, c['inputs_train'].shape[1]:]
+                total_val_loss += mse(pred_val, c['labels_val']).item()
+        
+        avg_val_loss = total_val_loss / len(catchment_data)
+        
         #save validation loss
-        history['val_loss'] = np.append(history['val_loss'],loss_validation.detach().cpu().numpy())
+        history['val_loss'].append(avg_val_loss)
+
         #if the validation loss has improved, saved the neural network parameters
-        if loss_validation < best_val_loss:
-            best_val_loss = loss_validation
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
             torch.save(model.state_dict(), 'weights.csv')
 
+        if epoch % 100 == 0: 
+            print(f'Epoch {epoch}')
+
     #plot how training and validation loss change during training
-    #the loss function for the validation data flattens out, so we have likely converged
+    #If validation loss curve flattens out, we have likely converged 
     fig, ax = plt.subplots()
     ax.plot(history['train_loss'], label='Training loss')
     ax.plot(history['val_loss'], label='Validation loss')
