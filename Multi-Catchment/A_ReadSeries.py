@@ -42,6 +42,10 @@ for catchment in catchments:
     #Keep only the three standard columns (some datasets have temp)
     df = df[standard_cols]
 
+    #Remove Group1 data after 2024 - there's an outlier that is effecting the model performance in the test set here 
+    if catchment == 'Group1':
+        df = df.loc[:'2024-01-01']
+
     #####################
     #Additional features to include based on precip and ETP 
     #7-day rolling mean 

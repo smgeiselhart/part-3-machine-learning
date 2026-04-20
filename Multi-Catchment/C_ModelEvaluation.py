@@ -50,7 +50,10 @@ for c in catchment_data:
 
 #Load the trained model (done in B script)
 model = LSTMModel(ninputs,nhidden,1,nlayers,0, n_static = n_static)
-model.load_state_dict(torch.load('weights_scheduler.csv'))
+#Load the Weights - pick which .csv based on the forecaster used!! 
+#model.load_state_dict(torch.load('weights.csv'))
+#model.load_state_dict(torch.load('weights_scheduler.csv'))
+model.load_state_dict(torch.load('weights_random_windows.csv'))
 model.eval()
 
 #Evaluate each catchment
