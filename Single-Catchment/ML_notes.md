@@ -336,11 +336,28 @@ Compares the predictive accuracy of two models using their validation-period pre
 - If `p < 0.05` and `dm_stat < 0` → model 1 (pred1) is significantly better
 - If `p >= 0.05` → no significant difference
 
-### Results
+### Results — 9-feature vs 7-feature try2
 
-Earlier DM comparisons (9-feature vs 6-feature, 9-feature vs original 7-feature) have been removed alongside those model runs — the predictions used in those tests came from models trained without reproducible seeds and are no longer authoritative. Rerun against the current 7-feature try2 predictions when needed.
+DM was run on both the validation and test periods (C scripts now save both).
 
-**Note on statistical vs practical significance:** With ~1800+ validation timesteps, the DM test has high statistical power and can detect even small systematic differences in squared errors. A statistically significant result does not imply a practically meaningful difference — especially worth keeping in mind when comparing models whose NSE scores differ by less than ~0.05.
+| Period | Winner | Consistent with NSE? |
+|---|---|---|
+| Validation (~1860 days) | 9-feature (p < 0.05) | Yes — val NSE 0.836 vs 0.787 |
+| Test (~745 days, 2024) | 7-feature try2 (p < 0.05) | Yes — test NSE 0.835 vs 0.811 |
+
+**Interpretation — the rank flip between val and test is the key finding.**
+
+Both models used the validation set during training for best-weight checkpoint selection, so a "win on validation" partly reflects capacity to fit that specific period's idiosyncrasies. The 9-feature model has two extra raw inputs (daily precipitation and ETp) that give it that extra capacity. On the truly held-out test period, however, the extra capacity works against it — the raw daily inputs are redundant with the engineered aggregates and end up fitting noise rather than signal.
+
+This is a classic mild-overfitting pattern: more complex model wins on val, loses on test. The 7-feature try2 model is regularized by construction because it only sees rainfall through smoothed aggregates (7d, 30d, 90d, surplus), so it can't overfit to individual daily values.
+
+**How to report:** Lead with the test DM result. Frame the val/test flip as evidence the feature reduction was the right call — raw daily precipitation and ETp add no generalizable information beyond their aggregates.
+
+**Caveats:**
+- Test period is a single hydrological year (2024, ~745 days) — a different test window could show a different rank.
+- Single-seed training per configuration. The numbers are reproducible (seeds set) but seed-to-seed variation is not characterized here.
+
+**Note on statistical vs practical significance:** With the large sample sizes, DM has high statistical power and will flag even small systematic differences in squared errors. A statistically significant result does not imply a practically meaningful difference — especially when NSE scores differ by less than ~0.05.
 
 ---
 
