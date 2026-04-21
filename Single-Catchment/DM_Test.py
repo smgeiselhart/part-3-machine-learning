@@ -9,7 +9,7 @@ from scipy import stats
 
 #Load both sets of predictions and one set of observations (obsv are the same for both)
 pred_9feat = np.load('LSTM_Havelse_9features/predictions_val.npy')
-pred_7feat = np.load('LSTM_Havelse_7features_try2/predictions_val.npy')
+pred_7feat = np.load('LSTM_Havelse_7features_/predictions_val.npy')
 obs = np.load('LSTM_Havelse_9features/observations_val.npy') #can be from either model 
 
 #Define the Diebold Mariano test function 
