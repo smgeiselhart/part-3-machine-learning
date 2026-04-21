@@ -110,7 +110,7 @@ attributions = svs.attribute(
     show_progress=True,
 )
 feature_importance      = attributions[0, 0, :].detach().numpy()  # (7,)
-feature_importance_norm = feature_importance / feature_importance.sum()
+feature_importance_norm = abs(feature_importance) / abs(feature_importance).sum()
 
 print("\nGlobal feature importance (ShapleyValueSampling, normalised):")
 for name, imp in zip(feature_names, feature_importance_norm):
