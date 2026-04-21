@@ -7,7 +7,7 @@ This model extends the single-catchment LSTM (Havelse) to a generalized multi-ca
 
 | Catchment | Rows | Date Range | Area (ha) | Key Notes |
 |-----------|------|------------|-----------|-----------|
-| Group1 | 5,521 | 2011-2026 | 2,914 | CSV uses commas (others use semicolons). Has a discharge outlier - needs investigation. |
+| Group1 | 5,521 | 2011-2026 | 2,914 | CSV uses commas (others use semicolons). Trimmed to end of 2024 due to discharge outlier/measurement error in later data. |
 | Group2 | 7,452 | 2003-2023 | 14,000 | Same as Havelse from single-catchment model. Column names differ (ETp vs ETP). |
 | Group3 | 13,881 | 1988-2025 | 11,863 | Longest record. 1,102 missing discharge values. |
 | Group5 | 8,358 | 2003-2025 | 120,300 | Largest catchment by far. 177 missing discharge, 101 missing ETP. |
@@ -22,6 +22,7 @@ The raw data had several inconsistencies that needed resolving:
 - **Extra columns**: Group11 has temperature - dropped to keep all catchments consistent.
 - **Different date ranges**: Left as-is. Each catchment is split independently into train/val/test.
 - **Missing data (NaN)**: Handled via linear interpolation in B_lstm_forecaster.py.
+- **Group1 outlier**: Trimmed Group1 data to end of 2024 to remove a measurement error spike.
 
 Only precipitation and ETp are available across all 6 catchments (no groundwater or temperature), so the feature set is more limited than the single-catchment model.
 
@@ -37,7 +38,7 @@ Only precipitation and ETp are available across all 6 catchments (no groundwater
 Log1p transformation applied to precipitation, ETp, precip_7d, and precip_30d based on histogram analysis (all right-skewed). Precip_surplus is NOT log-transformed because it contains negative values.
 
 ### Static inputs (per catchment)
-Added later to help the model differentiate between catchments:
+Added to help the model differentiate between catchments:
 - area_ha
 - mean_slope_percent
 - rural_percent
@@ -49,17 +50,37 @@ Mean elevation was excluded - all catchments are in Denmark where elevation does
 
 Static attributes are encoded through a small embedding network (Linear(6,16) -> ReLU -> Linear(16,16)) and concatenated to the dynamic inputs at every timestep.
 
-## Training Approach
+## Training Approaches
 
-Following **Training Approach 2** from Lecture 10: compute MSE for each catchment individually, then average across catchments. This gives each catchment equal weight regardless of time series length (avoids bias toward Group3 with 13,881 rows vs Group1 with 5,521).
+Two training approaches from Lecture 10 were implemented and compared:
+
+### Training Approach 2 (Full sequence per catchment)
+Each epoch loops through all catchments, computes MSE for each one individually using the full training timeseries, then averages the losses across catchments. This gives each catchment equal weight regardless of time series length (avoids bias toward Group3 with 13,881 rows vs Group1 with 5,521).
 
 Each epoch:
-1. Forward pass on each catchment separately
+1. Forward pass on each catchment separately (6 forward passes)
 2. Compute MSE per catchment (excluding 182-day warmup)
 3. Average losses across all 6 catchments
 4. Single backpropagation and weight update
 
-### Scaling
+### Training Approach 3 (Random window sampling)
+Instead of feeding full timeseries, each step randomly samples a fixed-length window (182 days warmup + 4 years training = 1,642 days) from each catchment. Windows are stacked into a batch with shape (n_catchments, 1642, n_features) and processed in a single forward pass.
+
+Each epoch:
+1. Randomly sample one window from each catchment's training data
+2. Stack windows into a batched tensor
+3. Single batched forward pass through all catchments at once
+4. Compute MSE (excluding warmup)
+5. Backprop and weight update
+6. Resample new windows for next epoch (acts as data augmentation)
+
+Benefits over Approach 2:
+- True parallel processing - one forward pass instead of 6
+- Data augmentation - model sees different time combinations each epoch
+- Fixed sequence length regardless of catchment data length
+- Reduced overfitting
+
+### Scaling (both approaches)
 Z-score normalization (mean/std) computed globally across ALL catchments' training data, then applied to each catchment. Static attributes scaled separately with their own mean/std.
 
 ### Train/Val/Test Split
@@ -73,14 +94,19 @@ LR search conducted (10 epochs each across range 1e-5 to 5e-2). Optimal LR found
 - LSTM layers: 1
 - Dropout: 0.2
 - Warmup period: 182 days (6 months)
-- Epochs: 500 (model converges around epoch 200, best weights saved automatically)
+- Epochs: 500
 - Optimizer: Adam
 - Gradient clipping: max norm 1.0
 
 ## Model Evolution & Results
 
-### Run 1: Baseline (2 features, fixed LR 1e-3, no static)
-Features: precipitation, ETp only. No dropout.
+### Run 1: Baseline
+- **Forecaster**: B_lstm_forecaster.py (Approach 2, full sequences)
+- **Features**: precipitation, ETp only (2 features)
+- **Static**: None
+- **LR**: Fixed at 1e-3
+- **Dropout**: 0
+- **Group1 trim**: No
 
 | Catchment | Val NSE | Test NSE |
 |-----------|---------|----------|
@@ -91,8 +117,14 @@ Features: precipitation, ETp only. No dropout.
 | Group7 | 0.61 | 0.57 |
 | Group11 | 0.76 | -0.70 |
 
-### Run 2: Added engineered features (5 features, fixed LR 1e-3, no static)
-Added precip_7d, precip_30d, precip_surplus. Log-transformed skewed inputs.
+### Run 2: Added engineered features
+- **Forecaster**: B_lstm_forecaster.py (Approach 2)
+- **Features**: 5 features (added precip_7d, precip_30d, precip_surplus)
+- **Static**: None
+- **LR**: Fixed at 1e-3
+- **Dropout**: 0
+- **Group1 trim**: No
+- **Transformations**: Log1p applied to precipitation, ETp, precip_7d, precip_30d
 
 | Catchment | Val NSE | Test NSE |
 |-----------|---------|----------|
@@ -103,8 +135,13 @@ Added precip_7d, precip_30d, precip_surplus. Log-transformed skewed inputs.
 | Group7 | 0.60 | 0.59 |
 | Group11 | 0.74 | -1.38 |
 
-### Run 3: Added CyclicLR scheduler (5 features, CyclicLR, no static)
-Same features, added CyclicLR scheduler with base_lr=1e-3, max_lr=1e-2.
+### Run 3: Added CyclicLR scheduler
+- **Forecaster**: B_lstm_forecaster_scheduler.py (Approach 2)
+- **Features**: 5 features
+- **Static**: None
+- **LR**: CyclicLR, base_lr=1e-3, max_lr=1e-2, step_size_up=4
+- **Dropout**: 0
+- **Group1 trim**: No
 
 | Catchment | Val NSE | Test NSE |
 |-----------|---------|----------|
@@ -115,43 +152,83 @@ Same features, added CyclicLR scheduler with base_lr=1e-3, max_lr=1e-2.
 | Group7 | 0.54 | 0.36 |
 | Group11 | 0.66 | -0.83 |
 
-### Run 4: Added static attributes (5 features, CyclicLR, 6 static attributes, dropout 0.2)
-Added catchment properties as static inputs through embedding network.
+### Run 4: Added static attributes + dropout
+- **Forecaster**: B_lstm_forecaster_scheduler.py (Approach 2)
+- **Features**: 5 dynamic + 6 static attributes
+- **Static**: area_ha, mean_slope_percent, rural/urban/nature/lake percent (embedded via FC network)
+- **LR**: CyclicLR, base_lr=1e-3, max_lr=1e-2
+- **Dropout**: 0.2
+- **Group1 trim**: No
 
 | Catchment | Val NSE | Test NSE |
 |-----------|---------|----------|
 | Group1 | -0.31 | -0.16 |
 | Group2 | 0.74 | **0.86** |
-| Group3 | **0.79** | 0.44 |
-| Group5 | **0.77** | 0.49 |
-| Group7 | **0.72** | 0.66 |
+| Group3 | 0.79 | 0.44 |
+| Group5 | 0.77 | 0.49 |
+| Group7 | 0.72 | 0.66 |
 | Group11 | 0.70 | 0.13 |
 
-**Static attributes were the single biggest improvement** - they allow the model to differentiate between catchments. Group2 and Group5 saw the largest jumps.
+**Static attributes were a major breakthrough** - they allow the model to differentiate between catchments. Group2 and Group5 saw the largest jumps.
+
+### Run 5: Random window sampling + Group1 trim
+- **Forecaster**: B_lstm_forecaster_random_windows.py (Approach 3)
+- **Features**: 5 dynamic + 6 static attributes
+- **Static**: Same as Run 4
+- **LR**: CyclicLR, base_lr=1e-3, max_lr=1e-2
+- **Dropout**: 0.2
+- **Group1 trim**: Yes - data trimmed to end of 2024 to remove outlier
+- **Window size**: 182-day warmup + 4 years = 1,642 days per sample
+
+| Catchment | Val NSE | Test NSE |
+|-----------|---------|----------|
+| Group1 | **0.63** | -0.53 |
+| Group2 | 0.73 | 0.81 |
+| Group3 | 0.80 | 0.45 |
+| Group5 | **0.84** | 0.38 |
+| Group7 | **0.78** | **0.79** |
+| Group11 | 0.66 | 0.38 |
+
+**Random window sampling combined with the Group1 trim produced the most balanced model.** All 6 catchments achieved validation NSE > 0.6 for the first time. Training and validation loss curves track closely together throughout training with no visible overfitting gap.
+
+## Summary of Improvements
+
+| Change | Biggest impact |
+|--------|----------------|
+| Engineered features (Run 2) | Group5 validation: -0.10 → 0.35 |
+| CyclicLR (Run 3) | Group1 validation: -2.46 → -1.79 |
+| Static attributes (Run 4) | Group5 validation: 0.19 → 0.77 |
+| Random windows + Group1 trim (Run 5) | Group1 validation: -0.31 → 0.63 |
+
+The two biggest improvements came from adding **static attributes** (Run 4) and switching to **random window sampling** combined with **trimming Group1's outlier** (Run 5).
 
 ## Key Observations
 
-- **Group1** remains problematic across all runs. Likely caused by a discharge outlier/measurement error visible in the data overview plots. This should be investigated and potentially clipped.
-- **Group2** (Havelse) performs best overall, which makes sense as it's the same catchment the original single-catchment model was built for.
-- **Group3** has strong validation but weaker test performance - the test period may have different hydrological conditions than training.
-- **Group11** shows signs of overfitting (good validation, poor test) - more data cleaning may help (1,119 missing discharge values).
-- Training and validation loss curves diverge around epoch 200, indicating the model has converged by that point. Extra epochs beyond ~300 are unnecessary.
+- **Group1** finally reached respectable validation performance (0.63) after the outlier trim + random window sampling. Test performance is still weak, but the remaining test period is a small sample (2024) that may have unusual hydrological conditions.
+- **Group2** (Havelse) consistently performs well across all runs - this is the same catchment the original single-catchment model was built for.
+- **Group5** (largest catchment) achieved the best validation NSE in Run 5 (0.84). It went from failing completely in Run 1 to being one of the best-performing catchments.
+- **Group7** achieved the best test NSE (0.79) in Run 5, showing the model generalizes well to unseen data for this catchment.
+- **Group3** still has weaker test performance despite strong validation - the test period may represent hydrological conditions not seen during training.
+- **Group11** consistently shows signs of overfitting (better validation than test) - more data cleaning may help.
+- Training and validation loss curves track together in Run 5, indicating the random window approach reduced overfitting compared to earlier runs.
 
 ## Script Structure
 
 | Script | Purpose |
 |--------|---------|
-| A_ReadSeries.py | Data loading, standardization, feature engineering, visualization |
-| B_lstm_forecaster.py | Data loading functions, scaling, loss functions (also used as import by other scripts) |
-| B_lstm_forecaster_scheduler.py | Main training script with LR search and CyclicLR scheduler |
+| A_ReadSeries.py | Data loading, standardization, feature engineering, Group1 trim, visualization |
+| B_lstm_forecaster.py | Data loading functions, scaling, loss functions (used as import by other scripts). Also contains a full Approach 2 training loop. |
+| B_lstm_forecaster_scheduler.py | Training script with LR search + CyclicLR scheduler (Approach 2) |
+| B_lstm_forecaster_random_windows.py | Training script with random window sampling + CyclicLR scheduler (Approach 3) |
 | C_ModelEvaluation.py | Load saved weights, compute NSE per catchment, generate diagnostic plots |
 | model.py | LSTM architecture with optional static attribute embedding |
 
 ## Potential Future Improvements
 
-- Fix Group1 discharge outlier (clip or remove)
-- Add temperature data where available
+- Add temperature data where available (Group11 already has it)
 - Add groundwater data where available
-- Implement Training Approach 3 (random window sampling) from Lecture 10 for faster training and better generalization
-- Cross-validation: train on 5 catchments, test on the 6th to evaluate true generalization
-- Experiment with model size (nhidden=32 vs 64) to address overfitting
+- Sample multiple windows per catchment per batch (currently 1) for more stable gradients
+- Cross-validation: train on 5 catchments, test on the 6th to evaluate true generalization to unseen catchments
+- Experiment with model size (nhidden=32 vs 64)
+- Try different window sizes (e.g. 2 years vs 4 years of training per window)
+- Investigate why some catchments have weak test performance despite strong validation
