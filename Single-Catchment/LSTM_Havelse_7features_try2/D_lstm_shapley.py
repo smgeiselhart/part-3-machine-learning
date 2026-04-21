@@ -7,6 +7,10 @@ from captum.attr import (ShapleyValueSampling,
 from B_lstm_forecaster import load_datafile, scale_series, unscale_series, nse, mse
 from model import LSTMModel
 
+# Set random seeds for reproducibility
+torch.manual_seed(42)
+np.random.seed(42)
+
 # =============================================================================
 # Utility functions defined in script B
 # =============================================================================
@@ -110,7 +114,7 @@ attributions = svs.attribute(
     show_progress=True,
 )
 feature_importance      = attributions[0, 0, :].detach().numpy()  # (7,)
-feature_importance_norm = feature_importance / feature_importance.sum()
+feature_importance_norm = abs(feature_importance) / abs(feature_importance).sum()
 
 print("\nGlobal feature importance (ShapleyValueSampling, normalised):")
 for name, imp in zip(feature_names, feature_importance_norm):

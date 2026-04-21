@@ -13,8 +13,8 @@ os.makedirs(figures_dir, exist_ok=True)
 from model import LSTMModel
 
 # Set random seeds for reproducibility
-#torch.manual_seed(42)
-#np.random.seed(42)
+torch.manual_seed(42)
+np.random.seed(42)
 
 #Function that loads the datafile
 #Returns training and validation inputs and labels
