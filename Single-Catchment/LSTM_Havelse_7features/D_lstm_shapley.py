@@ -197,7 +197,7 @@ fig, axes = plt.subplots(
     nrows=4, figsize=(12, 14),
     gridspec_kw={'height_ratios': [0.9, 1.4, 1.2, 1.2]}
 )
-colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728','#9467bd', '#8c564b', '#e377c2', '#7f7f7f','#17becf']
+colors = ['#2ca02c', '#d62728','#9467bd', '#8c564b', '#e377c2', '#7f7f7f','#17becf']
 
 # Share x-axis across the three time series panels (rows 1, 2, 3)
 axes[2].sharex(axes[1])

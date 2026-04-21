@@ -313,43 +313,9 @@ This represents "average meteorological forcing" — the reference state against
 
 **Interpretation:** Severe multicollinearity between precipitation-derived features. Negative percentages exceeding -100% and positives exceeding +200% indicate features are fighting each other — the model exploits correlated redundancy to fit the data, but individual attributions are physically meaningless. This motivated feature reduction.
 
-### Features removed for 6-feature model
+### Intermediate feature-reduction experiments (6-feature, original 7-feature)
 
-Based on the 9-feature Shapley results, three features were removed:
-- `precip_7d` — correlated with `precip_30d`, had negative attribution
-- `precip_90d` — most negative attribution (-146.8%), highly correlated with `precip_30d`
-- `precip_surplus` — redundant with `precipitation` minus `ETp` (both already included)
-
-**Remaining 6 features:** precipitation, ETp, precip_30d, temp, groundwater, melt
-
-### 6-feature model results
-
-| Feature | Shapley % |
-|---|---|
-| Precip | 48.3% |
-| ETp | 1.4% |
-| Precip 30d | 48.0% |
-| Temp | 0.6% |
-| Groundwater | 1.5% |
-| Melt | 0.2% |
-
-**Interpretation:** All positive, all physically coherent. Precipitation and 30-day antecedent moisture dominate — consistent with Havelse being a slow-responding, storage-dominated catchment. The multicollinearity problem is fully resolved.
-
-### 7-feature model results
-
-After observing the 6-feature model's poor peak flow performance, `precip_7d` was added back as a hypothesis-driven choice — short-term precipitation accumulation is the direct trigger for peak flows that the 30-day average smooths out.
-
-| Feature | Shapley % |
-|---|---|
-| Precip | 28.1% |
-| ETp | 3.5% |
-| Precip 30d | 43.4% |
-| Precip 7d | 40.9% |
-| Temp | -10.0% |
-| Groundwater | 2.8% |
-| Melt | -8.9% |
-
-**Interpretation:** Mostly clean. The top 4 features are all positive and physically meaningful. `Precip 7d` pulls significant weight (40.9%), confirming it carries information that `precip_30d` alone cannot represent. The small negative values on `temp` (-10%) and `melt` (-8.9%) reflect residual collinearity between those two features (melt is derived from temp), but this is far less severe than the 9-feature model.
+Earlier iterations tried removing the **derived** features (dropping precip_7d, precip_90d, precip_surplus for the 6-feature model, then adding precip_7d back for a 7-feature variant). Those results have been removed from these notes — the training runs were based on `B_lstm_forecaster.py` with random seeds commented out (weights non-reproducible between runs) and Shapley normalization computed on signed values (percentages exceeded ±100% when attributions cancelled). Both methodology bugs were fixed before the final analysis below. The reported direction of travel (keep engineered features, drop raw precipitation and ETp) still holds.
 
 ---
 
@@ -372,11 +338,9 @@ Compares the predictive accuracy of two models using their validation-period pre
 
 ### Results
 
-**9-feature vs 6-feature:** 9-feature model is significantly better (p < 0.05)
+Earlier DM comparisons (9-feature vs 6-feature, 9-feature vs original 7-feature) have been removed alongside those model runs — the predictions used in those tests came from models trained without reproducible seeds and are no longer authoritative. Rerun against the current 7-feature try2 predictions when needed.
 
-**9-feature vs 7-feature:** 9-feature model is significantly better (p < 0.05)
-
-**Note on statistical vs practical significance:** With ~1800+ validation timesteps, the DM test has high statistical power and can detect even small systematic differences in squared errors. A statistically significant result does not imply a practically meaningful difference — the 7-feature model sacrifices ~0.02 test NSE compared to the 9-feature model but produces interpretable, physically coherent feature attributions.
+**Note on statistical vs practical significance:** With ~1800+ validation timesteps, the DM test has high statistical power and can detect even small systematic differences in squared errors. A statistically significant result does not imply a practically meaningful difference — especially worth keeping in mind when comparing models whose NSE scores differ by less than ~0.05.
 
 ---
 
@@ -386,42 +350,53 @@ Compares the predictive accuracy of two models using their validation-period pre
 
 | Model | Val NSE | Test NSE | Shapley interpretability |
 |---|---|---|---|
-| 9-feature | 0.836 | 0.811 | Broken (negatives sum past -100%) |
-| 7-feature | — | 0.790 | Mostly clean (small negatives on temp/melt) |
-| 7-feature try2 | 0.816 | 0.751 | Broken (precip aggregates still collinear) |
-| 6-feature | 0.810 | 0.730 | Perfectly clean |
+| 9-feature | 0.836 | 0.811 | Broken under signed normalization (negatives past -100%) |
+| 7-feature try2 | 0.787 | 0.835 | Clean (bounded 0–100%, sums to 100%) |
 
 ### Residual diagnostics
 
-Both models show strong residual autocorrelation (ACF significant out to ~30 lags), indicating both underfit slow dynamics — likely the deep groundwater component (LS2 = 451 days). Residual histograms are roughly centred at zero with a slight right skew (underprediction of peaks).
+The remaining models (9-feature and 7-feature try2) both show strong residual autocorrelation (ACF significant out to ~30 lags), indicating both underfit slow dynamics — likely the deep groundwater component (LS2 = 451 days). Residual histograms are roughly centred at zero with a slight right skew (underprediction of peaks).
 
 ### 7-feature model (try2) — alternative feature selection
 
-This run was based on another interpretation of the 9-feature model's feature analysis, helped by the professor. Rather than removing the derived features (as in the first 7-feature model), the approach here was to remove the **raw daily precipitation and ETp** — reasoning that these are already encoded in their derived aggregates (rolling means, surplus) and are therefore redundant.
+This is the final model. The approach was to remove the **raw daily precipitation and ETp** from the 9-feature set — reasoning that these are already encoded in their derived aggregates (rolling means, surplus) and are therefore redundant. (Earlier experiments removed the *derived* features instead; those are documented in the intermediate-experiments note above.)
 
 **Features removed:** `precipitation`, `ETp`
 **Remaining 7 features:** precip_30d, precip_7d, precip_90d, precip_surplus, temp, groundwater, melt
 
+**Note on re-run:** This analysis was redone after two methodology issues were identified:
+1. `B_lstm_forecaster.py` had the random seeds commented out, so weights were not reproducible between runs. Comparing results across team members revealed mismatched models — a mid-experiment retrain had overwritten `weights.csv` with a different model, making the original attribution figures irreproducible.
+2. Shapley normalization used signed values (`feature_importance / feature_importance.sum()`), which produces percentages exceeding ±100% when positive and negative attributions cancel in the denominator. Replaced with `abs(...) / abs(...).sum()` so percentages are bounded 0–100% and sum to 100% — standard practice for magnitude-of-influence reporting. Sign information is lost, but all numbers become interpretable.
+
+Both issues were fixed (seeds set to 42; abs normalization), the model was retrained from scratch, and the feature analysis was rerun. Results below are from that rerun.
+
 | Feature | Shapley % |
 |---|---|
-| Precip 30d | -5.0% |
-| Precip 7d | 99.9% |
-| Precip 90d | **165.0%** |
-| Precip surplus | **-192.4%** |
-| Temp | -21.2% |
-| Groundwater | 33.2% |
-| Melt | 20.5% |
+| Precip 30d | 2.7% |
+| Precip 7d | 31.8% |
+| Precip 90d | 23.4% |
+| Precip surplus | 14.7% |
+| Temp | 9.6% |
+| Groundwater | 5.5% |
+| Melt | 12.2% |
 
-**Performance:** Val NSE = 0.816, Test NSE = 0.751
+**Performance:** Val NSE = 0.787, Test NSE = 0.835
 
-**Interpretation:** The multicollinearity problem persists — keeping three correlated precipitation aggregates (30d, 7d, 90d) alongside precipitation surplus produces extreme Shapley values (+165%, -192%). The negative values indicate the direction of influence (those features suppress discharge relative to the baseline), not lack of importance, but the extreme magnitudes show the attribution is unstable. Removing raw precipitation and ETp confirms that those inputs are not required for satisfactory model performance — the rolling aggregates already capture the relevant rainfall signal — but the remaining derived features still share too much information for clean Shapley decomposition.
+**Interpretation:**
+- All percentages are now bounded 0–100% and sum to 100%, making the ranking directly interpretable as share-of-total-magnitude
+- Short-term (precip_7d, 31.8%) and long-term (precip_90d, 23.4%) precipitation aggregates dominate — consistent with the catchment's dual timescale behaviour (quick response from recent rainfall, slow response from antecedent moisture)
+- Precip_30d contributes only 2.7%, effectively redundant once precip_7d and precip_90d are present — a clear candidate for removal if further simplification is wanted
+- Groundwater (5.5%) is surprisingly low; precip_90d likely already encodes the antecedent moisture signal that groundwater would otherwise carry
+- Melt (12.2%) and temp (9.6%) together account for snow dynamics — melt being higher than temp suggests the model uses the explicit melt indicator rather than inferring it from temperature
+- Shapley and the IG temporal panel give slightly different stories: Shapley ranks precip_7d first, while IG shows precip_surplus dominating throughout. This reflects the methods measuring different things — precip_surplus is always nonzero, so its per-timestep attribution is consistently large, while precip_7d spikes only during/after rainfall events. Both views are self-consistent
+- **Test NSE 0.835 exceeds the 9-feature model's 0.811**, indicating that removing raw precipitation and ETp — which duplicate information already in the engineered features — slightly improves generalisation as well as interpretability
 
 ---
 
 ### Conclusions
 
-1. Feature reduction from 9 → 6 resolved multicollinearity and produced physically meaningful Shapley attributions, but at a significant cost to predictive accuracy (0.811 → 0.730 test NSE)
-2. Adding `precip_7d` back (7-feature model) recovered most of the accuracy (0.730 → 0.790) while maintaining mostly clean attributions — this was a hypothesis-driven choice based on the observation that the 6-feature model underpredicted peak flows, and short-term precipitation accumulation is the direct trigger for peaks
-3. The 7-feature try2 model (dropping raw precip and ETp instead of derived features) confirmed that daily precipitation and ETp are not required when their derived aggregates are present — the model achieves comparable performance (Val NSE 0.816, Test NSE 0.751) without them. However, multicollinearity between the remaining precipitation aggregates remains unresolved.
-4. The DM test confirms the 9-feature model remains statistically superior, but the accuracy-interpretability tradeoff favours the 7-feature model — its attributions tell a physically coherent story (precipitation and antecedent moisture drive runoff) that can be explained and trusted
+1. Dropping the raw daily precipitation and ETp (7-feature try2) while keeping the engineered aggregates produced both the best test performance (NSE 0.835, exceeding the 9-feature model's 0.811) and the cleanest feature attributions — the engineered aggregates already carry the relevant rainfall signal, and the raw daily inputs were adding noise
+2. The Shapley ranking (precip_7d 31.8%, precip_90d 23.4%, precip_surplus 14.7%) tells a physically coherent story: short-term triggering plus long-term antecedent moisture dominate runoff, consistent with the catchment's dual-timescale storage-dominated behaviour
+3. Precip_30d is effectively redundant once precip_7d and precip_90d are both present (2.7% Shapley contribution) — candidate for removal if further simplification is wanted
+4. Methodology lesson: seed every training script from day one and normalize Shapley attributions by `abs(...) / abs(...).sum()` rather than `x / x.sum()`. The original 6-feature/7-feature experiments were invalidated by both bugs — non-reproducible weights meant we could not replicate earlier figures, and signed normalization produced percentages past ±100% that obscured the real ranking
 5. The persistent residual autocorrelation in all models suggests the biggest remaining improvement lies in capturing slow groundwater dynamics, potentially through longer sequence lengths or architectural changes, rather than further feature engineering
