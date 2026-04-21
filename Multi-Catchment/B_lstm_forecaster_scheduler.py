@@ -12,6 +12,9 @@ from model import LSTMModel
 figures_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures')
 os.makedirs(figures_dir, exist_ok=True)
 
+weights_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'weights')
+os.makedirs(weights_dir, exist_ok=True)
+
 #################################################################
 # define time periods number of epochs to train and LSTM hyperparameters
 index_warmup = 182  # time step index where warm up period ends
