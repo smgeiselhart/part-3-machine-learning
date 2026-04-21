@@ -12,9 +12,12 @@ import datetime as dt
 import os 
 import pandas as pd 
 
-#Create folder where all figures are saved 
+#Create folder where all figures are saved, same with weights 
 figures_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures')
 os.makedirs(figures_dir, exist_ok=True)
+
+weights_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'weights')
+
 
 #Hyperparameters - these MUST match training 
 ninputs = len(feature_cols)
@@ -52,9 +55,9 @@ for c in catchment_data:
 #Load the trained model (done in B script)
 model = LSTMModel(ninputs,nhidden,1,nlayers,0, n_static = n_static)
 #Load the Weights - pick which .csv based on the forecaster used!! 
-#model.load_state_dict(torch.load('weights.csv'))
-#model.load_state_dict(torch.load('weights_scheduler.csv'))
-model.load_state_dict(torch.load('weights_random_windows.csv'))
+#model.load_state_dict(torch.load(os.path.join(weights_dir, 'weights.csv')))
+#model.load_state_dict(torch.load(os.path.join(weights_dir, 'weights_scheduler.csv')))
+model.load_state_dict(torch.load(os.path.join(weights_dir, 'weights_random_windows.csv')))
 model.eval()
 
 #Evaluate each catchment

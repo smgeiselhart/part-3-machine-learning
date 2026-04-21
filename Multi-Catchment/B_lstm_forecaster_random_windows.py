@@ -7,8 +7,12 @@ import os
 from B_lstm_forecaster import load_catchment, scale_series, mse, feature_cols, catchments, datafolder
 from model import LSTMModel
 
+#Figures and weights directory 
 figures_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures')
 os.makedirs(figures_dir, exist_ok=True)
+
+weights_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'weights')
+os.makedirs(weights_dir, exist_ok=True)
 
 #################################################################
 # Hyperparameters
@@ -105,7 +109,7 @@ for epoch in range(epochs):
 
     if avg_val_loss < best_val_loss:
         best_val_loss = avg_val_loss
-        torch.save(model.state_dict(), 'weights_random_windows.csv')
+        torch.save(model.state_dict(), os.path.join(weights_dir, 'weights_random_windows.csv'))
 
     if epoch % 100 == 0:
         print(f'Epoch {epoch}: train={loss.item():.4f}, val={avg_val_loss:.4f}')

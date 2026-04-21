@@ -10,6 +10,11 @@ import matplotlib.pyplot as plt
 figures_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures')
 os.makedirs(figures_dir, exist_ok=True)
 
+#Same for weights
+weights_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'weights')
+os.makedirs(weights_dir, exist_ok=True)
+
+
 from model import LSTMModel
 
 # Set random seeds for reproducibility
@@ -189,7 +194,7 @@ if __name__ == '__main__':
         #if the validation loss has improved, saved the neural network parameters
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            torch.save(model.state_dict(), 'weights.csv')
+            torch.save(model.state_dict(), os.path.join(weights_dir, 'weights.csv'))
 
         if epoch % 100 == 0: 
             print(f'Epoch {epoch}')

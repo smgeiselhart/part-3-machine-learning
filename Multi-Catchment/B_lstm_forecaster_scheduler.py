@@ -158,7 +158,7 @@ for epoch in range(epochs):
     # if the validation loss has improved, save the neural network parameters
     if avg_val_loss < best_val_loss:
         best_val_loss = avg_val_loss
-        torch.save(model.state_dict(), 'weights_scheduler.csv')
+        torch.save(model.state_dict(), os.path.join(weights_dir, 'weights_scheduler.csv'))
     
     if epoch % 100 == 0: 
         print(f'Epoch {epoch}: train={avg_train_loss.item():.4f}, val={avg_val_loss:.4f}')
