@@ -66,7 +66,9 @@ flowobs_test = unscale_series(labels_test[0,:],labelscales).numpy()
 
 #Save predictions to be used in Diebold Mariano Test (separate script)
 np.save('predictions_val.npy', flowpred_val)
+np.save('predictions_test.npy', flowpred_test)
 np.save('observations_val.npy', flowobs_val)
+np.save('observations_test.npy', flowobs_test)
 
 ######### EVALUATION ###########
 #Calculate the NSE on training 
