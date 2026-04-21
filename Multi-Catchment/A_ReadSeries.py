@@ -54,6 +54,10 @@ for catchment in catchments:
     #30-day rolling mean 
     df['precip_30d'] = df['precipitation'].rolling(window = 30, min_periods = 1, center = True).mean()
 
+    #90-day rolling mean
+    df['precip_90d'] = df['precipitation'].rolling(window = 90, min_periods = 1, center = True).mean()
+
+
     #Daily surplus = precip - ETP (net water balance)
     df['precip_surplus'] = df['precipitation'] - df['ETp']
 

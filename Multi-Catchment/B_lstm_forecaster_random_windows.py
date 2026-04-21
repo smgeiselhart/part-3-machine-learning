@@ -20,7 +20,7 @@ epochs = 500
 ninputs = len(feature_cols)
 nhidden = 64
 nlayers = 1
-n_static = 6
+n_static = 8
 
 #################################################################
 # Load and scale data (same as before)
