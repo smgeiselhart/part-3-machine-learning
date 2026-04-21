@@ -3,6 +3,8 @@ import torch.optim as optim
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import pandas as pd
+
 
 from B_lstm_forecaster import load_catchment, scale_series, unscale_series, mse, nse, feature_cols, catchments, datafolder
 from model import LSTMModel
@@ -52,14 +54,15 @@ def run_fold(test_catchment_name):
     #Compute input and label scales from the 5 training catchments ONLY 
     all_inputs_train = torch.cat([c['inputs_train'] for c in train_catchments], dim=1)
     all_labels_train = torch.cat([c['labels_train'] for c in train_catchments], dim=1)
-    _, inputscales = scale_series(full_inputs)
-    _, labelscales = scale_series(full_labels)
+    _, inputscales = scale_series(all_inputs_train)
+    _, labelscales = scale_series(all_labels_train)
 
     #Apply the scale to the 5 training catchments 
-    c['inputs_train'], _ = scale_series(c['inputs_train'], inputscales)
-    c['inputs_val'], _ = scale_series(c['inputs_val'], inputscales)
-    c['labels_train'], _ = scale_series(c['labels_train'], labelscales)
-    c['labels_val'], _ = scale_series(c['labels_val'], labelscales)
+    for c in train_catchments:
+        c['inputs_train'], _ = scale_series(c['inputs_train'], inputscales)
+        c['inputs_val'], _ = scale_series(c['inputs_val'], inputscales)
+        c['labels_train'], _ = scale_series(c['labels_train'], labelscales)
+        c['labels_val'], _ = scale_series(c['labels_val'], labelscales)
 
     #Apply this same training scale to the held-out test catchment 
     test_inputs_scaled, _ = scale_series(test_inputs, inputscales)
@@ -74,7 +77,7 @@ def run_fold(test_catchment_name):
     test_static_scaled = (test_catchment['static'] - static_mean) / static_std
 
     # Pre-stack all static attributes as a (n_catchments, n_static) tensor for batching
-    all_static_scaled = torch.stack([c['static_scaled'] for c in catchment_data])
+    all_static_scaled = torch.stack([c['static_scaled'] for c in train_catchments])
 
     #################################################################
     # Model + optimizer + scheduler
@@ -97,7 +100,7 @@ def run_fold(test_catchment_name):
         # Sample one random window from each catchment
         batch_inputs = []
         batch_labels = []
-        for c in catchment_data:
+        for c in train_catchments:
             T = c['inputs_train'].shape[1]
             start = torch.randint(0, T - window_total, (1,)).item()
             batch_inputs.append(c['inputs_train'][:, start:start+window_total, :])
@@ -122,22 +125,35 @@ def run_fold(test_catchment_name):
         model.eval()
         total_val_loss = 0.0
         with torch.no_grad():
-            for c in catchment_data:
+            for c in train_catchments:
                 inputs_trainval = torch.cat([c['inputs_train'], c['inputs_val']], dim=1)
                 pred_trainval = model(inputs_trainval, c['static_scaled'].unsqueeze(0))
                 pred_val = pred_trainval[:, c['inputs_train'].shape[1]:]
                 total_val_loss += mse(pred_val, c['labels_val']).item()
 
-        avg_val_loss = total_val_loss / len(catchment_data)
+        avg_val_loss = total_val_loss / len(train_catchments)
         history['val_loss'].append(avg_val_loss)
 
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            torch.save(model.state_dict(), 'weights_random_windows.csv')
+            torch.save(model.state_dict(), f'weights_LOCO_{test_catchment_name}.csv')
 
         if epoch % 100 == 0:
-            print(f'Epoch {epoch}: train={loss.item():.4f}, val={avg_val_loss:.4f}')
+            print(f'[{test_catchment_name}] Epoch {epoch}: train={loss.item():.4f}, val={avg_val_loss:.4f}')
 
+    #################################################################
+    # Load best weights for this fold and evaluate on held-out test catchment
+    model.load_state_dict(torch.load(f'weights_LOCO_{test_catchment_name}.csv'))
+    model.eval()
+    with torch.no_grad():
+        pred_test = model(test_inputs_scaled, test_static_scaled.unsqueeze(0))
+
+    pred_phys = unscale_series(pred_test[0, window_warmup:], labelscales).numpy()
+    obs_phys  = unscale_series(test_labels_scaled[0, window_warmup:], labelscales).numpy()
+    test_nse  = nse(obs_phys, pred_phys)
+    print(f'[{test_catchment_name}] Test NSE: {test_nse:.3f}')
+    
+    
     #################################################################
     # Plot training history
     fig, axes = plt.subplots(nrows=2, sharex=True)
@@ -149,5 +165,20 @@ def run_fold(test_catchment_name):
     axes[1].set_ylabel('Learning Rate')
     axes[1].set_xlabel('Epoch')
     plt.tight_layout()
-    fig.savefig(os.path.join(figures_dir, 'lstm_training_history_random_windows.png'), dpi=150)
-    plt.show()
+    fig.savefig(os.path.join(figures_dir, f'lstm_training_history_LOCO_{test_catchment_name}.png'), dpi=150)
+
+    plt.close(fig)
+
+    return test_nse 
+
+if __name__ == '__main__':
+    fold_order = ['Group2'] + [c for c in catchments if c != 'Group2']
+    results = {}
+    for test_name in fold_order:
+        print(f'\n=== LOCO fold: test = {test_name} ===')
+        results[test_name] = run_fold(test_name)
+
+    df = pd.DataFrame({'catchment': list(results.keys()),
+                       'test_nse':  list(results.values())})
+    print('\n' + df.to_string(index=False))
+    df.to_csv(os.path.join(figures_dir, 'loco_cv_results.csv'), index=False)
