@@ -114,7 +114,7 @@ attributions = svs.attribute(
     show_progress=True,
 )
 feature_importance      = attributions[0, 0, :].detach().numpy()  # (9,)
-feature_importance_norm = feature_importance / feature_importance.sum()
+feature_importance_norm = np.abs(feature_importance) / np.abs(feature_importance).sum()
 
 print("\nGlobal feature importance (ShapleyValueSampling, normalised):")
 for name, imp in zip(feature_names, feature_importance_norm):
@@ -197,15 +197,19 @@ bars = ax.bar(feature_names, feature_importance_norm, color=colors,
 ax.set_ylabel('Normalised\nImportance')
 ax.set_title('(a) Global Feature Importance (ShapleyValueSampling)',
              fontsize=11, fontweight='bold', loc='left')
-ax.set_ylim(0, max(feature_importance_norm) * 1.3)
+y_max = max(feature_importance_norm) * 1.3
+y_min = min(feature_importance_norm) * 1.3 if min(feature_importance_norm) < 0 else 0
+ax.set_ylim(y_min, y_max)
+ax.axhline(0, color = 'black', linewidth = 0.5)
 ax.set_yticks([])
 ax.spines[['top', 'right']].set_visible(False)
 for bar, val in zip(bars, feature_importance_norm):
-    ax.text(
-        bar.get_x() + bar.get_width() / 2,
-        bar.get_height() + 0.01,
-        f'{val:.1%}', ha='center', va='bottom', fontsize=11, fontweight='bold'
-    )
+    if val >= 0:
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+            f'{val:.1%}', ha='center', va='bottom', fontsize=11, fontweight='bold')
+    else: 
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() - 0.01, 
+        f'{val:.1%}', ha='center', va='top', fontsize=11, fontweight='bold')
 
 # --- Panel 2: Temporal Output Importance (IntegratedGradients) ---
 ax2 = axes[1]

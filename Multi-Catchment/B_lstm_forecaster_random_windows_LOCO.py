@@ -30,31 +30,48 @@ def run_fold(test_catchment_name):
     #################################################################
     # Load all 6 catchments and split into 5 training and 1 test 
     catchment_data = [load_catchment(c) for c in catchments]
-    train_catchment = [c for c in catchment_data if c['name'] != test_catchment_name]
+    train_catchments = [c for c in catchment_data if c['name'] != test_catchment_name]
     test_catchment = next(c for c in catchment_data if c['name'] == test_catchment_name)
     
     #Resplit the training catchment: 70% training, 30% validation 
     val_frac = 0.30 
-    for c in train_catchment: 
+    for c in train_catchments: 
         full_inputs = torch.cat([c['inputs_train'], c['inputs_val'], c['inputs_test']], dim=1)
         full_labels = torch.cat([c['labels_train'], c['labels_val'], c['labels_test']], dim=1)
         T = full_inputs.shape[1]
         n_train = int(T * (1 - val_frac))
- 
-        _, inputscales = scale_series(full_inputs)
-        _, labelscales = scale_series(full_labels)
+        c['inputs_train'] = full_inputs[:, :n_train, :]
+        c['inputs_val']   = full_inputs[:, n_train:, :]
+        c['labels_train'] = full_labels[:, :n_train]
+        c['labels_val']   = full_labels[:, n_train:]
 
-        c['inputs_train'], _ = scale_series(c['inputs_train'], inputscales)
-        c['inputs_val'], _ = scale_series(c['inputs_val'], inputscales)
-        c['labels_train'], _ = scale_series(c['labels_train'], labelscales)
-        c['labels_val'], _ = scale_series(c['labels_val'], labelscales)
+    #Held-out catchment: full series, no split 
+    test_inputs = torch.cat([test_catchment['inputs_train'], test_catchment['inputs_val'], test_catchment['inputs_test']], dim=1)
+    test_labels = torch.cat([test_catchment['labels_train'], test_catchment['labels_val'], test_catchment['labels_test']], dim=1)
+
+    #Compute input and label scales from the 5 training catchments ONLY 
+    all_inputs_train = torch.cat([c['inputs_train'] for c in train_catchments], dim=1)
+    all_labels_train = torch.cat([c['labels_train'] for c in train_catchments], dim=1)
+    _, inputscales = scale_series(full_inputs)
+    _, labelscales = scale_series(full_labels)
+
+    #Apply the scale to the 5 training catchments 
+    c['inputs_train'], _ = scale_series(c['inputs_train'], inputscales)
+    c['inputs_val'], _ = scale_series(c['inputs_val'], inputscales)
+    c['labels_train'], _ = scale_series(c['labels_train'], labelscales)
+    c['labels_val'], _ = scale_series(c['labels_val'], labelscales)
+
+    #Apply this same training scale to the held-out test catchment 
+    test_inputs_scaled, _ = scale_series(test_inputs, inputscales)
+    test_labels_scaled, _ = scale_series(test_labels, labelscales)
 
     # Scale static attributes
-    all_static = torch.stack([c['static'] for c in catchment_data])
+    all_static = torch.stack([c['static'] for c in train_catchments])
     static_mean = all_static.mean(dim=0)
     static_std = all_static.std(dim=0)
-    for c in catchment_data:
+    for c in train_catchments:
         c['static_scaled'] = (c['static'] - static_mean) / static_std
+    test_static_scaled = (test_catchment['static'] - static_mean) / static_std
 
     # Pre-stack all static attributes as a (n_catchments, n_static) tensor for batching
     all_static_scaled = torch.stack([c['static_scaled'] for c in catchment_data])
