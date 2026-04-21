@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from statsmodels.graphics.tsaplots import plot_acf 
 import datetime as dt 
 import os 
+import pandas as pd 
 
 #Create folder where all figures are saved 
 figures_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures')
@@ -156,5 +157,21 @@ for patch, color in zip(bp['boxes'], colors):
 fig.savefig(os.path.join(figures_dir, 'boxandwhisker.png'), dpi=150)
 
 plt.show()
+
+#Save test predictions in m3/s for model comparison 
+CATCHMENT_AREA_M2 = 140000000 #140km2 = 14,000 ha 
+
+df_all = pd.read_csv('Data/LSTM_dataframe.csv', sep = ',', index_col = 0, parse_dates = True)
+n = len(df_all)
+test_index = int(n * 0.90)
+dates_test = df_all.index[test_index:]
+
+test_predictions = pd.DataFrame({
+    'predicted_m3s': flowpred_test * CATCHMENT_AREA_M2 / 1000 / 86400,
+    'observed_m3s': flowobs_test * CATCHMENT_AREA_M2 / 1000 / 86400,
+}, index=dates_test)
+test_predictions.index.name = 'date'
+test_predictions.to_csv('Data/test_predictions.csv')
+
 
 

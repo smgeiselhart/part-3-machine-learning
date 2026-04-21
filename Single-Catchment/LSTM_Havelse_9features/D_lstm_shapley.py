@@ -7,6 +7,10 @@ from captum.attr import (ShapleyValueSampling,
 from B_lstm_forecaster import load_datafile, scale_series, unscale_series, nse, mse
 from model import LSTMModel
 
+#Set random seeds for reproducibility
+torch.manual_seed(42)
+np.random.seed(42)
+
 # =============================================================================
 # Utility functions defined in script B
 # =============================================================================

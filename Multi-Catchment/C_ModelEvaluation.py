@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from statsmodels.graphics.tsaplots import plot_acf 
 import datetime as dt 
 import os 
+import pandas as pd 
 
 #Create folder where all figures are saved 
 figures_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures')
@@ -24,7 +25,7 @@ nlayers = 1
 catchment_data = [load_catchment(c) for c in catchments]
 
 #Set number of static inputs 
-n_static = 6
+n_static = 8
 
 #Compute global scaling from all training data (must match training data)
 all_inputs_train = torch.cat([c['inputs_train'] for c in catchment_data], dim=1)
@@ -178,5 +179,25 @@ for c in catchment_data:
     ax.set_title(f'{name} - ACF of Residuals')
     fig.savefig(os.path.join(figures_dir, f'{name}_residuals_acf.png'), dpi=150)
     plt.close()
+
+    #Save Group 2 test predictions in m3/s for model comparison 
+    if name == 'Group2':
+        group2_df = pd.read_csv(os.path.join(datafolder, 'Group2', 'LSTM_dataframe.csv'),
+                            sep=',', index_col=0, parse_dates=True)
+        n = len(group2_df)
+        test_index = int(n*0.90)
+        dates_test = group2_df.index[test_index:]
+
+        CATCHMENT_AREA_M2 = 140_000_000  # 140 km² = 14,000 ha
+
+        test_predictions = pd.DataFrame({
+            'predicted_m3s': flowpred_test * CATCHMENT_AREA_M2 / 1000 / 86400,
+            'observed_m3s': flowobs_test * CATCHMENT_AREA_M2 / 1000 / 86400,
+        }, index=dates_test)
+
+        test_predictions.index.name = 'date'
+        test_predictions.to_csv(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                             'Data/Group2/Group2_test_predictions.csv'))
+      
 
 

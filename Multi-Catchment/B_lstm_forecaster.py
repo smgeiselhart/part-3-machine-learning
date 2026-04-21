@@ -20,7 +20,8 @@ catchments = ['Group1', 'Group2', 'Group3', 'Group5', 'Group7', 'Group11']
 datafolder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Data')
 
 #Feature columns to use as inputs 
-feature_cols = ['precipitation', 'ETp', 'precip_7d', 'precip_30d', 'precip_surplus']
+#Not including precip or ETP based on feature analysis of single-catchment 
+feature_cols = ['precip_7d', 'precip_30d', 'precip_90d','precip_surplus']
 
 #Reads LSTM_dataframe csv for each catchment, interpolates NaN values 
 #Stacks the feature columns into an input tensor and extracts discharge as the label tensor 
@@ -35,8 +36,8 @@ def load_catchment(catchment_name):
     properties_file = os.path.join(datafolder, catchment_name, 'catchment_properties.csv')
     properties = pd.read_csv(properties_file, sep = ';', index_col = 0, skipinitialspace = True)
 
-    static_cols = ['area_ha', 'mean_slope_percent', 'rural_percent', 
-                   'urban_percent', 'nature_percent', 'lake_percent']
+    static_cols = ['area_ha', 'mean_elevation_m', 'mean_slope_percent', 'rural_percent', 
+                   'urban_percent', 'nature_percent', 'lake_percent', 'longest_flow_path_km']
     static = torch.tensor([float(properties.loc[col, 'value']) for col in static_cols], dtype = torch.float32)
 
     #Interpolate all NaN values in timeseries data 
@@ -48,9 +49,9 @@ def load_catchment(catchment_name):
     
     inputs = np.stack([data_in[col].to_numpy() for col in feature_cols], axis =1)    
 
-    #Apply log1p transformation to skewed inputs (precip, Etp)
+    #Apply log1p transformation to skewed inputs (precip7d, 30d
     #see histograms of raw input data created in Script A
-    log_cols = [0, 1, 2, 3]
+    log_cols = [0, 1]
     for col in log_cols: 
         inputs[:, col] = np.log1p(inputs[:, col])
 
@@ -59,7 +60,7 @@ def load_catchment(catchment_name):
 
     return{
         'name': catchment_name,
-        'static': static,   #shape: (6,)
+        'static': static,   #shape: (8,)
         'inputs_train': inputs[:,:index_validation,:],
         'inputs_val': inputs[:,index_validation:index_test,:],
         'inputs_test' : inputs[:,index_test:,:],
@@ -98,7 +99,7 @@ if __name__ == '__main__':
     #index where validation starts computed in load_catchment function
     index_warmup = 182 #time step index where warm up period ends (6 mo)
     
-    epochs = 200 #Starting low to make sure it runs 
+    epochs = 500  
     ninputs = len(feature_cols) #no. of input variables
     nhidden = 64 #no. of hidden states, i.e. "parallel" LSTM cells
     nlayers = 1 #no. of LSTM layers, i.e. LSTM cells in sequence
