@@ -1,3 +1,6 @@
+#This script uses 5 catchments to train and tests on one catchment
+#LOCO = leave one catchment out 
+
 import torch
 import torch.optim as optim
 import numpy as np
@@ -9,8 +12,14 @@ import pandas as pd
 from B_lstm_forecaster import load_catchment, scale_series, unscale_series, mse, nse, feature_cols, catchments, datafolder
 from model import LSTMModel
 
+#Create a figures, weights, and data directory 
 figures_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures')
 os.makedirs(figures_dir, exist_ok=True)
+
+weights_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'weights')
+os.makedirs(weights_dir, exist_ok=True)
+
+data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Data')
 
 #Add seed for reproducibility 
 torch.manual_seed(42)
@@ -137,14 +146,14 @@ def run_fold(test_catchment_name):
 
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            torch.save(model.state_dict(), f'weights_LOCO_{test_catchment_name}.csv')
+            torch.save(model.state_dict(), os.path.join(weights_dir, f'weights_LOCO_{test_catchment_name}.csv'))
 
         if epoch % 100 == 0:
             print(f'[{test_catchment_name}] Epoch {epoch}: train={loss.item():.4f}, val={avg_val_loss:.4f}')
 
     #################################################################
     # Load best weights for this fold and evaluate on held-out test catchment
-    model.load_state_dict(torch.load(f'weights_LOCO_{test_catchment_name}.csv'))
+    model.load_state_dict(torch.load(os.path.join(weights_dir, f'weights_LOCO_{test_catchment_name}.csv')))
     model.eval()
     with torch.no_grad():
         pred_test = model(test_inputs_scaled, test_static_scaled.unsqueeze(0))
@@ -182,4 +191,4 @@ if __name__ == '__main__':
     df = pd.DataFrame({'catchment': list(results.keys()),
                        'test_nse':  list(results.values())})
     print('\n' + df.to_string(index=False))
-    df.to_csv(os.path.join(figures_dir, 'loco_cv_results.csv'), index=False)
+    df.to_csv(os.path.join(data_dir, 'loco_cv_results.csv'), index=False)
