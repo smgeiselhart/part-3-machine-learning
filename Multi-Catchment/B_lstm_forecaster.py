@@ -49,9 +49,9 @@ def load_catchment(catchment_name):
     
     inputs = np.stack([data_in[col].to_numpy() for col in feature_cols], axis =1)    
 
-    #Apply log1p transformation to skewed inputs (precip7d, 30d
+    #Apply log1p transformation to skewed inputs (precip7d, 30d, 90d)
     #see histograms of raw input data created in Script A
-    log_cols = [0, 1]
+    log_cols = [0, 1, 2]
     for col in log_cols: 
         inputs[:, col] = np.log1p(inputs[:, col])
 

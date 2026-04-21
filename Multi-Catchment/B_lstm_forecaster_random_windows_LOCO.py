@@ -36,6 +36,7 @@ def run_fold(test_catchment_name):
     test_catchment = next(c for c in catchment_data if c['name'] == test_catchment_name)
     
     #Resplit the training catchment: 70% training, 30% validation 
+    #They were imported with 65/25/10 split, but here a whole dataset for one catchment is used for test 
     val_frac = 0.30 
     for c in train_catchments: 
         full_inputs = torch.cat([c['inputs_train'], c['inputs_val'], c['inputs_test']], dim=1)
@@ -47,7 +48,7 @@ def run_fold(test_catchment_name):
         c['labels_train'] = full_labels[:, :n_train]
         c['labels_val']   = full_labels[:, n_train:]
 
-    #Held-out catchment: full series, no split 
+    #Held-out test catchment: full series, no split 
     test_inputs = torch.cat([test_catchment['inputs_train'], test_catchment['inputs_val'], test_catchment['inputs_test']], dim=1)
     test_labels = torch.cat([test_catchment['labels_train'], test_catchment['labels_val'], test_catchment['labels_test']], dim=1)
 
