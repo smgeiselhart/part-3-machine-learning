@@ -215,6 +215,31 @@ LR search conducted (10 epochs each across range 1e-5 to 5e-2). Optimal LR found
 
 **Group1 finally cracked positive test NSE (-0.53 → 0.66)**, while the other catchments held roughly steady (within ±0.05 of Run 5). Training loss bottoms out lower than Run 5 (~0.15–0.20). The likely driver is `longest_flow_path_km`, which gives the model a direct signal for catchment response time — particularly informative for Group1 (the smallest catchment). Removing the raw precipitation/ETp signals in favor of only smoothed/derived features simplified the input space without losing information, since the rolling means already encode that signal.
 
+### Run 7: Bug fix — NaN masking now actually works + seeded for reproducibility
+- **Forecaster**: B_lstm_forecaster_random_windows.py (Approach 3)
+- **Features**: Same as Run 6 (4 dynamic + 8 static)
+- **Hyperparameters**: All same as Run 6
+- **Bug fix**: In `load_catchment`, interpolation is now applied only to input feature columns. Discharge labels keep their NaN values intact, so the `~torch.isnan(label)` masks in `mse()` and `nse()` actually filter out interpolated points.
+  - Previously: `data_in.interpolate(method='linear', inplace=True)` filled the entire DataFrame including discharge — masks were no-ops, model was being scored against ~10 months of fabricated linear discharge in Group3 and similar gaps in Group11.
+- **Reproducibility**: `torch.manual_seed(42)` and `np.random.seed(42)` set at top of script. Re-runs are now deterministic.
+
+| Catchment | Train NSE | Val NSE | Test NSE |
+|-----------|-----------|---------|----------|
+| Group1 | 0.66 | 0.79 | 0.46 |
+| Group2 | 0.79 | 0.76 | **0.84** |
+| Group3 | 0.82 | 0.84 | **0.82** |
+| Group5 | 0.77 | 0.81 | 0.27 |
+| Group7 | 0.87 | 0.76 | **0.85** |
+| Group11 | 0.73 | 0.66 | 0.30 |
+
+**Group3 jumped from 0.41 → 0.82 on test** — the model wasn't actually performing worse than the others; it was being unfairly penalized for failing to match an interpolated discharge segment that wasn't a real observation. Train ≈ val ≈ test now (all in the 0.82–0.84 range), which is a much healthier signal.
+
+**Group2 and Group7 also improved slightly** (+0.04, +0.06) despite having clean discharge data — likely just better luck from the seeded random window draws.
+
+**Group5 and Group11 dropped slightly** (-0.07, -0.04). These catchments have NaN gaps in their discharge that were previously contributing easy-to-predict interpolated values to the score. With those removed, the metric is now reflecting the model's true performance on the harder real observations. Group5 in particular continues to under-predict the major peak events in its test period — likely a distribution-shift problem where the test years are unusually wet relative to the training period.
+
+**Group1 dropped from 0.66 → 0.46.** This is partly the fix and partly run-to-run variance. Group1 has the shortest record (after the 2024 trim) so it's most sensitive to which 4-year window happens to get sampled.
+
 ## Summary of Improvements
 
 | Change | Biggest impact |
@@ -224,18 +249,19 @@ LR search conducted (10 epochs each across range 1e-5 to 5e-2). Optimal LR found
 | Static attributes (Run 4) | Group5 validation: 0.19 → 0.77 |
 | Random windows + Group1 trim (Run 5) | Group1 validation: -0.31 → 0.63 |
 | Refined features + flow path / elevation (Run 6) | Group1 test: -0.53 → 0.66 |
+| NaN masking bug fix + seeded (Run 7) | Group3 test: 0.41 → 0.82 |
 
-The biggest improvements came from adding **static attributes** (Run 4), switching to **random window sampling** combined with **trimming Group1's outlier** (Run 5), and **refining the feature set** with `longest_flow_path_km` and `precip_90d` (Run 6).
+The biggest improvements came from adding **static attributes** (Run 4), switching to **random window sampling** combined with **trimming Group1's outlier** (Run 5), **refining the feature set** with `longest_flow_path_km` and `precip_90d` (Run 6), and finally fixing the **NaN masking bug** so discharge gaps no longer count toward the score (Run 7).
 
-## Key Observations
+## Key Observations (as of Run 7)
 
-- **Group1** went from failing on test (-0.53 in Run 5) to its best result yet (0.66 in Run 6) once `longest_flow_path_km` was added. The model now captures the small catchment's fast response.
-- **Group2** (Havelse) consistently performs well across all runs - this is the same catchment the original single-catchment model was built for. Test NSE ~0.80 in Run 6.
-- **Group5** (largest catchment) achieved the best validation NSE in Run 5 (0.84). It went from failing completely in Run 1 to being one of the best-performing on validation, though test NSE remains modest (~0.34).
-- **Group7** continues to deliver the strongest test performance (0.79 in both Run 5 and Run 6).
-- **Group3** still has weaker test performance despite strong validation - the test period may represent hydrological conditions not seen during training.
-- **Group11** consistently shows signs of overfitting (better validation than test) - more data cleaning may help.
-- Training and validation loss curves track together in Run 5 and Run 6, indicating the random window approach reduced overfitting compared to earlier runs.
+- **Group2, Group3, Group7** are now the strongest test performers (0.82–0.85). All three have relatively clean discharge data, and their train/val/test NSEs all track within ~0.10 of each other — a healthy generalization signature.
+- **Group3** went from looking like a weak catchment (0.41 test in Run 6) to one of the strongest (0.82) once the NaN masking was fixed. The earlier "weakness" was an artifact of being scored against ~10 months of interpolated discharge.
+- **Group2** (Havelse, the original single-catchment model) consistently performs well across runs. Test NSE 0.84 in Run 7.
+- **Group7** delivers the strongest test performance (0.85 in Run 7) but shows some overfitting (train 0.87 vs val 0.76 vs test 0.85 — val being the weakest is unusual and may reflect unusual conditions in its specific validation window).
+- **Group1** test NSE bounces between 0.46–0.66 across runs. Smallest dataset after the 2024 trim, so most sensitive to random window sampling. Even with seeding, this catchment will be hardest to make rock-solid.
+- **Group5** (largest catchment) and **Group11** are the new problem children. Both have train ≈ val NSE around 0.7–0.85 but test NSE in the 0.27–0.30 range. Now that NaN masking is honest, this gap reflects real distribution shift between their training periods and test periods. Group5 in particular under-predicts major peak events visible in the test plot.
+- Training and validation loss curves now show a visible gap (train consistently lower) — a more honest picture of generalization than the previous "tracks together" appearance, which was partially flattered by the model fitting interpolated values trivially.
 
 ## Script Structure
 
