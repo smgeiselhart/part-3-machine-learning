@@ -19,7 +19,7 @@ np.random.seed(42)
 #Function that loads the datafile
 #Returns training and validation inputs and labels
 #Also returns the index where validation period starts (at 65% through dataset)
-#Also interpolates any NaN values to avoid corrupting model. Loss is not computed on these. 
+#Also interpolates any NaN input values to avoid corrupting model. Loss is not computed on these. 
 def load_datafile(datafile):
     data_in=pd.read_csv(datafile, sep=',', index_col = 0, parse_dates = True)
    
@@ -58,7 +58,6 @@ def load_datafile(datafile):
     #labels can have batch dimension, we don't need feature dimension
     labels = labels.unsqueeze(0)
     
-
     inputs_train = inputs[:,:index_validation,:]
     inputs_val = inputs[:,index_validation:index_test,:]
     inputs_test = inputs[:,index_test:,:]

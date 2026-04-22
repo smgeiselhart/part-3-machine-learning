@@ -28,27 +28,30 @@ Only precipitation and ETp are available across all 6 catchments (no groundwater
 
 ## Feature Engineering
 
-### Dynamic inputs (per timestep)
-- precipitation (raw)
-- ETp (raw)
+### Dynamic inputs (per timestep) — current set (Run 6)
 - precip_7d: 7-day rolling mean of precipitation (short-term triggering signal)
 - precip_30d: 30-day rolling mean of precipitation (antecedent moisture)
+- precip_90d: 90-day rolling mean of precipitation (longer-term wetness)
 - precip_surplus: precipitation - ETp (net water balance)
 
-Log1p transformation applied to precipitation, ETp, precip_7d, and precip_30d based on histogram analysis (all right-skewed). Precip_surplus is NOT log-transformed because it contains negative values.
+Raw `precipitation` and raw `ETp` were dropped in Run 6 based on the single-catchment feature analysis — the rolling means already encode the precipitation signal in a smoother form, and ETp's contribution is captured through `precip_surplus`.
 
-### Static inputs (per catchment)
+Log1p transformation applied to precip_7d, precip_30d, and precip_90d based on histogram analysis (all right-skewed). Precip_surplus is NOT log-transformed because it contains negative values.
+
+### Static inputs (per catchment) — current set (Run 6)
 Added to help the model differentiate between catchments:
 - area_ha
+- mean_elevation_m
 - mean_slope_percent
 - rural_percent
 - urban_percent
 - nature_percent
 - lake_percent
+- longest_flow_path_km
 
-Mean elevation was excluded - all catchments are in Denmark where elevation doesn't vary much.
+Initially `mean_elevation_m` was excluded (Denmark is flat), but it was added back in Run 6 along with `longest_flow_path_km`. The flow-path length proved especially helpful for differentiating catchment response times (notably Group1).
 
-Static attributes are encoded through a small embedding network (Linear(6,16) -> ReLU -> Linear(16,16)) and concatenated to the dynamic inputs at every timestep.
+Static attributes are encoded through a small embedding network (Linear(n_static,16) -> ReLU -> Linear(16,16)) and concatenated to the dynamic inputs at every timestep.
 
 ## Training Approaches
 
@@ -191,6 +194,27 @@ LR search conducted (10 epochs each across range 1e-5 to 5e-2). Optimal LR found
 
 **Random window sampling combined with the Group1 trim produced the most balanced model.** All 6 catchments achieved validation NSE > 0.6 for the first time. Training and validation loss curves track closely together throughout training with no visible overfitting gap.
 
+### Run 6: Refined feature set
+- **Forecaster**: B_lstm_forecaster_random_windows.py (Approach 3)
+- **Features**: 4 dynamic features — dropped raw `precipitation` and raw `ETp` based on single-catchment feature analysis; added `precip_90d` (90-day rolling mean). Final set: precip_7d, precip_30d, precip_90d, precip_surplus.
+- **Static**: 8 attributes — added `mean_elevation_m` back in and added `longest_flow_path_km`. Final set: area_ha, mean_elevation_m, mean_slope_percent, rural_percent, urban_percent, nature_percent, lake_percent, longest_flow_path_km.
+- **LR**: CyclicLR, base_lr=1e-3, max_lr=1e-2 (unchanged)
+- **Dropout**: 0.2 (unchanged)
+- **Group1 trim**: Yes (unchanged)
+- **Window size**: 182-day warmup + 4 years (unchanged)
+- **Log1p transformation**: Applied to precip_7d, precip_30d, precip_90d (precip_surplus excluded due to negative values)
+
+| Catchment | Test NSE |
+|-----------|----------|
+| Group1 | **0.66** |
+| Group2 | 0.80 |
+| Group3 | 0.41 |
+| Group5 | 0.34 |
+| Group7 | **0.79** |
+| Group11 | 0.34 |
+
+**Group1 finally cracked positive test NSE (-0.53 → 0.66)**, while the other catchments held roughly steady (within ±0.05 of Run 5). Training loss bottoms out lower than Run 5 (~0.15–0.20). The likely driver is `longest_flow_path_km`, which gives the model a direct signal for catchment response time — particularly informative for Group1 (the smallest catchment). Removing the raw precipitation/ETp signals in favor of only smoothed/derived features simplified the input space without losing information, since the rolling means already encode that signal.
+
 ## Summary of Improvements
 
 | Change | Biggest impact |
@@ -199,18 +223,19 @@ LR search conducted (10 epochs each across range 1e-5 to 5e-2). Optimal LR found
 | CyclicLR (Run 3) | Group1 validation: -2.46 → -1.79 |
 | Static attributes (Run 4) | Group5 validation: 0.19 → 0.77 |
 | Random windows + Group1 trim (Run 5) | Group1 validation: -0.31 → 0.63 |
+| Refined features + flow path / elevation (Run 6) | Group1 test: -0.53 → 0.66 |
 
-The two biggest improvements came from adding **static attributes** (Run 4) and switching to **random window sampling** combined with **trimming Group1's outlier** (Run 5).
+The biggest improvements came from adding **static attributes** (Run 4), switching to **random window sampling** combined with **trimming Group1's outlier** (Run 5), and **refining the feature set** with `longest_flow_path_km` and `precip_90d` (Run 6).
 
 ## Key Observations
 
-- **Group1** finally reached respectable validation performance (0.63) after the outlier trim + random window sampling. Test performance is still weak, but the remaining test period is a small sample (2024) that may have unusual hydrological conditions.
-- **Group2** (Havelse) consistently performs well across all runs - this is the same catchment the original single-catchment model was built for.
-- **Group5** (largest catchment) achieved the best validation NSE in Run 5 (0.84). It went from failing completely in Run 1 to being one of the best-performing catchments.
-- **Group7** achieved the best test NSE (0.79) in Run 5, showing the model generalizes well to unseen data for this catchment.
+- **Group1** went from failing on test (-0.53 in Run 5) to its best result yet (0.66 in Run 6) once `longest_flow_path_km` was added. The model now captures the small catchment's fast response.
+- **Group2** (Havelse) consistently performs well across all runs - this is the same catchment the original single-catchment model was built for. Test NSE ~0.80 in Run 6.
+- **Group5** (largest catchment) achieved the best validation NSE in Run 5 (0.84). It went from failing completely in Run 1 to being one of the best-performing on validation, though test NSE remains modest (~0.34).
+- **Group7** continues to deliver the strongest test performance (0.79 in both Run 5 and Run 6).
 - **Group3** still has weaker test performance despite strong validation - the test period may represent hydrological conditions not seen during training.
 - **Group11** consistently shows signs of overfitting (better validation than test) - more data cleaning may help.
-- Training and validation loss curves track together in Run 5, indicating the random window approach reduced overfitting compared to earlier runs.
+- Training and validation loss curves track together in Run 5 and Run 6, indicating the random window approach reduced overfitting compared to earlier runs.
 
 ## Script Structure
 

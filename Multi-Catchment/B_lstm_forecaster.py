@@ -45,8 +45,10 @@ def load_catchment(catchment_name):
                    'urban_percent', 'nature_percent', 'lake_percent', 'longest_flow_path_km']
     static = torch.tensor([float(properties.loc[col, 'value']) for col in static_cols], dtype = torch.float32)
 
-    #Interpolate all NaN values in timeseries data 
-    data_in.interpolate(method = 'linear', inplace = True)
+    # interpolate the NaN values in input columns only
+    data_in[feature_cols] = data_in[feature_cols].interpolate(method='linear')
+    # leave discharge raw — keep NaNs
+    labels = torch.tensor(data_in['discharge'].to_numpy(), dtype=torch.float32).unsqueeze(0)
 
     #Set training (first 65%), validation (next 25%) and test (last 10%) sets
     index_validation = int(len(data_in) * 0.65)
