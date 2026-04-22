@@ -451,28 +451,32 @@ Predicted impact: minimal. Validation/test NSEs should be unchanged because ther
 
 **Observed impact:**
 
-| Model | Pre-fix Val NSE | Post-fix Val NSE | Pre-fix Test NSE | Post-fix Test NSE |
-|-------|-----------------|------------------|------------------|-------------------|
-| 9-feature | 0.836 | 0.819 | 0.811 | 0.776 |
-| 7-feature try2 | 0.787 | 0.787 | 0.835 | 0.835 |
+| Model | Pre-fix Train | Post-fix Train | Pre-fix Val | Post-fix Val | Pre-fix Test | Post-fix Test |
+|-------|---------------|----------------|-------------|--------------|--------------|---------------|
+| 9-feature | — | 0.871 | 0.836 | 0.819 | 0.811 | 0.776 |
+| 7-feature try2 | 0.924 | 0.839 | 0.787 | 0.790 | 0.835 | 0.807 |
 
-The 7-feature model lands at exactly the same NSEs as before — the mask change did not move the optimization trajectory in any meaningful way. The 9-feature model shifted slightly downward on both val (-0.017) and test (-0.035). With the seeded training making runs deterministic, these are real (not noise-driven) shifts caused by removing 46 interpolated training points from the loss surface.
+Both models shifted modestly. The 7-feature model's training NSE dropped notably (0.924 → 0.839), validation barely moved (+0.003), and test dropped (-0.028). The 9-feature model shifted similarly on val (-0.017) and test (-0.035). With seeded training making runs deterministic, these are real (not noise-driven) shifts caused by removing 46 interpolated training points from the loss surface.
 
-**Training NSE went up** in both models (9-feature: 0.871; 7-feature: 0.924). The model is now scored only on real observations during training, and those happen to be the cleaner part of the signal.
+The training NSE drop in the 7-feature model is interesting: removing the 46-day linear-ramp segment took an "easy" chunk of points out of the training set, which lowers the average training NSE without necessarily meaning the model got worse. It's also possible the model previously dedicated some capacity to fitting that ramp, and now uses that capacity elsewhere.
 
 ### Implications for conclusions
 
 | Conclusion in Part 7 | Still holds? |
 |----------------------|--------------|
-| 7-feature beats 9-feature on test | **Yes — gap actually wider now (0.835 vs 0.776 instead of 0.835 vs 0.811)** |
-| 9-feature wins on validation | Yes — but smaller margin (0.819 vs 0.787 instead of 0.836 vs 0.787) |
-| Shapley feature ranking on 7-feature model | Unchanged — model is identical |
-| Final model: 7-feature try2 | Reinforced |
+| 7-feature beats 9-feature on test | Yes (0.807 vs 0.776, gap 0.031 — was 0.024 pre-fix) |
+| 9-feature wins on validation | Yes — but smaller margin (0.819 vs 0.790 instead of 0.836 vs 0.787) |
+| Shapley feature ranking on 7-feature model | Needs re-running — weights have changed |
+| Final model: 7-feature try2 | Holds |
 
 ### Caveats
 
-- The DM test (Part 6) was *not* re-run with the post-fix weights. Direction of the conclusions almost certainly unchanged given how little the test-period numbers moved (7-feature unchanged, 9-feature slightly worse), but the exact dm_stat and p-values will shift.
-- Shapley analysis (Part 5/Part 7) was *not* re-run for either model. Since the 7-feature model produces identical NSEs (i.e. identical weights), the 7-feature Shapley table is still valid. The 9-feature model has slightly different weights, but the Shapley story for that model was already that it's broken under signed normalization — the qualitative finding is unaffected.
+- The DM test (Part 6) was *not* re-run with the post-fix weights. Direction of the conclusions almost certainly unchanged given that 7-feature still beats 9-feature on test, but the exact dm_stat and p-values will shift.
+- Shapley analysis (Part 5/Part 7) was *not* re-run. The 7-feature model now has different weights than what was used in the original Shapley table, so strictly the table is stale. The qualitative ranking (precip_7d and precip_90d dominate, precip_30d effectively redundant) is likely robust because it reflects feature redundancy rather than fine-grained model behaviour, but the exact percentages would shift slightly if re-run.
+
+### Bug-in-the-bug-fix moment
+
+When the fix was first applied, the 7-feature script returned NSEs identical to pre-fix down to 3 decimal places (val 0.787 / test 0.835). That was suspicious — seeded re-runs *should* move slightly when the loss surface changes. Inspection found that the original buggy line `data_in.interpolate(method='linear', inplace=True)` had been left in place above the new fix, so the discharge column was still being filled before the new code touched anything. After deleting the old line, the 7-feature numbers moved as expected.
 
 ### Methodology lesson
 
