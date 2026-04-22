@@ -23,8 +23,11 @@ np.random.seed(42)
 def load_datafile(datafile):
     data_in=pd.read_csv(datafile, sep=',', index_col = 0, parse_dates = True)
    
-    #Interpolate all NaN values 
-    data_in.interpolate(method = 'linear', inplace = True)
+    # interpolate the NaN values in input columns only
+    input_cols = ['precipitation', 'ETp', 'precip_30d', 'precip_7d', 'precip_90d','precip_surplus', 'temp', 'groundwater', 'melt']
+    data_in[input_cols] = data_in[input_cols].interpolate(method='linear')
+    # leave discharge raw — keep NaNs
+    labels = torch.tensor(data_in['discharge'].to_numpy(), dtype=torch.float32).unsqueeze(0)
 
     #Set training (first 65%), validation (next 25%) and test (last 10%) sets
     index_validation = int(len(data_in) * 0.65)
