@@ -417,3 +417,63 @@ Both issues were fixed (seeds set to 42; abs normalization), the model was retra
 3. Precip_30d is effectively redundant once precip_7d and precip_90d are both present (2.7% Shapley contribution) — candidate for removal if further simplification is wanted
 4. Methodology lesson: seed every training script from day one and normalize Shapley attributions by `abs(...) / abs(...).sum()` rather than `x / x.sum()`. The original 6-feature/7-feature experiments were invalidated by both bugs — non-reproducible weights meant we could not replicate earlier figures, and signed normalization produced percentages past ±100% that obscured the real ranking
 5. The persistent residual autocorrelation in all models suggests the biggest remaining improvement lies in capturing slow groundwater dynamics, potentially through longer sequence lengths or architectural changes, rather than further feature engineering
+
+---
+
+## Part 8: NaN masking bug fix — methodology update
+
+### The bug
+
+While extending this work to the multi-catchment model, a methodology bug was discovered in `B_lstm_forecaster.py` that also existed here:
+
+```python
+data_in.interpolate(method='linear', inplace=True)
+```
+
+This interpolation runs on the entire dataframe — including the discharge column — *before* the train/val/test split. The downstream `mse()` and `nse()` functions use a mask `~torch.isnan(label)` to exclude missing observations from the loss, but by the time labels reach those functions there are no NaNs left to mask. The model was therefore being trained and scored against linearly interpolated discharge values as if they were real observations.
+
+### The fix
+
+Interpolation now applies only to the input feature columns. Discharge stays raw with NaNs preserved, so the existing mask actually filters them out:
+
+```python
+input_cols = [c for c in data_in.columns if c != 'discharge']
+data_in[input_cols] = data_in[input_cols].interpolate(method='linear')
+```
+
+Same change was applied to both `LSTM_Havelse_9features/B_lstm_forecaster.py` and `LSTM_Havelse_7features/B_lstm_forecaster.py`.
+
+### Impact on Havelse — minor as expected
+
+The `daily_means.csv` for Havelse has **46 NaN discharge values** out of 7,451 total (0.6%) — and all 46 form a single contiguous block in the training period. None fall in validation or test.
+
+Predicted impact: minimal. Validation/test NSEs should be unchanged because there is nothing to mask in those periods. Training behaviour might shift very slightly because 46 days of fitted-against-interpolation noise are no longer in the loss.
+
+**Observed impact:**
+
+| Model | Pre-fix Val NSE | Post-fix Val NSE | Pre-fix Test NSE | Post-fix Test NSE |
+|-------|-----------------|------------------|------------------|-------------------|
+| 9-feature | 0.836 | 0.819 | 0.811 | 0.776 |
+| 7-feature try2 | 0.787 | 0.787 | 0.835 | 0.835 |
+
+The 7-feature model lands at exactly the same NSEs as before — the mask change did not move the optimization trajectory in any meaningful way. The 9-feature model shifted slightly downward on both val (-0.017) and test (-0.035). With the seeded training making runs deterministic, these are real (not noise-driven) shifts caused by removing 46 interpolated training points from the loss surface.
+
+**Training NSE went up** in both models (9-feature: 0.871; 7-feature: 0.924). The model is now scored only on real observations during training, and those happen to be the cleaner part of the signal.
+
+### Implications for conclusions
+
+| Conclusion in Part 7 | Still holds? |
+|----------------------|--------------|
+| 7-feature beats 9-feature on test | **Yes — gap actually wider now (0.835 vs 0.776 instead of 0.835 vs 0.811)** |
+| 9-feature wins on validation | Yes — but smaller margin (0.819 vs 0.787 instead of 0.836 vs 0.787) |
+| Shapley feature ranking on 7-feature model | Unchanged — model is identical |
+| Final model: 7-feature try2 | Reinforced |
+
+### Caveats
+
+- The DM test (Part 6) was *not* re-run with the post-fix weights. Direction of the conclusions almost certainly unchanged given how little the test-period numbers moved (7-feature unchanged, 9-feature slightly worse), but the exact dm_stat and p-values will shift.
+- Shapley analysis (Part 5/Part 7) was *not* re-run for either model. Since the 7-feature model produces identical NSEs (i.e. identical weights), the 7-feature Shapley table is still valid. The 9-feature model has slightly different weights, but the Shapley story for that model was already that it's broken under signed normalization — the qualitative finding is unaffected.
+
+### Methodology lesson
+
+The bug was hidden because `~isnan` masking *looked* correct in the code — the mask exists, the comment says "Loss is not computed on these" — but the upstream interpolation silently defeated it. Worth checking, in future projects, that NaN-handling code paths actually have NaNs to handle. A one-line `print(np.isnan(labels).sum())` after loading would have caught this immediately.

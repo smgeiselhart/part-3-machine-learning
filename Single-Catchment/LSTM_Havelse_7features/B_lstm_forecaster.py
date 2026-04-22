@@ -23,9 +23,6 @@ np.random.seed(42)
 def load_datafile(datafile):
     data_in=pd.read_csv(datafile, sep=',', index_col = 0, parse_dates = True)
    
-    #Interpolate all NaN values 
-    data_in.interpolate(method = 'linear', inplace = True)
-
     # interpolate the NaN values in input columns only
     input_cols = ['precip_30d', 'precip_7d', 'precip_90d','precip_surplus', 'temp', 'groundwater', 'melt']
     data_in[input_cols] = data_in[input_cols].interpolate(method='linear')
