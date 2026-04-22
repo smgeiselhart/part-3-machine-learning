@@ -18,8 +18,8 @@ os.makedirs(weights_dir, exist_ok=True)
 from model import LSTMModel
 
 # Set random seeds for reproducibility
-#torch.manual_seed(42)
-#np.random.seed(42)
+torch.manual_seed(42)
+np.random.seed(42)
 
 catchments = ['Group1', 'Group2', 'Group3', 'Group5', 'Group7', 'Group11']
 datafolder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Data')

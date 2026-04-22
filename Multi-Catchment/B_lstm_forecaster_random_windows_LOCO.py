@@ -12,6 +12,10 @@ import pandas as pd
 from B_lstm_forecaster import load_catchment, scale_series, unscale_series, mse, nse, feature_cols, catchments, datafolder
 from model import LSTMModel
 
+# Set random seeds for reproducibility
+torch.manual_seed(42)
+np.random.seed(42)
+
 #Create a figures, weights, and data directory 
 figures_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures')
 os.makedirs(figures_dir, exist_ok=True)
