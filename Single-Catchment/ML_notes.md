@@ -406,6 +406,7 @@ Both issues were fixed (seeds set to 42; abs normalization), the model was retra
 - Groundwater (5.5%) is surprisingly low; precip_90d likely already encodes the antecedent moisture signal that groundwater would otherwise carry
 - Melt (12.2%) and temp (9.6%) together account for snow dynamics — melt being higher than temp suggests the model uses the explicit melt indicator rather than inferring it from temperature
 - Shapley and the IG temporal panel give slightly different stories: Shapley ranks precip_7d first, while IG shows precip_surplus dominating throughout. This reflects the methods measuring different things — precip_surplus is always nonzero, so its per-timestep attribution is consistently large, while precip_7d spikes only during/after rainfall events. Both views are self-consistent
+- The same divergence appears for groundwater: Shapley ranks it as one of the lowest-magnitude contributors (1.9–2.2% across both 7- and 9-feature models), while the IG temporal panel shows it as a persistent, continuously-contributing feature throughout the validation period. This is consistent with groundwater's role as a slowly-varying state variable — its instantaneous contribution to predicted discharge is meaningful and constant, but globally it can be substituted by correlated long-term aggregates (precip_90d) without large loss in NSE. The two methods are answering different questions: Shapley asks "if this feature were removed, how much worse would the model do?" (penalizes redundancy), while IG asks "how much does this feature contribute to today's prediction right now?" (rewards persistent nonzero inputs). For a slow-responding, baseflow-dominated catchment like Havelse, the IG view arguably tells the more physically defensible story for groundwater — current discharge really is shaped by current groundwater state, even if a correlated proxy could fill in
 - **Test NSE 0.835 exceeds the 9-feature model's 0.811**, indicating that removing raw precipitation and ETp — which duplicate information already in the engineered features — slightly improves generalisation as well as interpretability
 
 ---
@@ -472,7 +473,47 @@ The training NSE drop in the 7-feature model is interesting: removing the 46-day
 ### Caveats
 
 - The DM test (Part 6) was *not* re-run with the post-fix weights. Direction of the conclusions almost certainly unchanged given that 7-feature still beats 9-feature on test, but the exact dm_stat and p-values will shift.
-- Shapley analysis (Part 5/Part 7) was *not* re-run. The 7-feature model now has different weights than what was used in the original Shapley table, so strictly the table is stale. The qualitative ranking (precip_7d and precip_90d dominate, precip_30d effectively redundant) is likely robust because it reflects feature redundancy rather than fine-grained model behaviour, but the exact percentages would shift slightly if re-run.
+
+### Post-fix Shapley results (both models)
+
+Re-run after the NaN masking fix and with abs normalization:
+
+**7-feature model (post-fix):**
+
+| Feature | Shapley % |
+|---|---|
+| Precip 7d | 35.92% |
+| Precip 90d | 33.19% |
+| Precip surplus | 15.40% |
+| Temp | 8.75% |
+| Precip 30d | 4.01% |
+| Groundwater | 2.17% |
+| Melt | 0.56% |
+
+**9-feature model (post-fix):**
+
+| Feature | Shapley % |
+|---|---|
+| Precip 7d | 22.44% |
+| Precip surplus | 20.63% |
+| Temp | 13.02% |
+| Precip 90d | 12.51% |
+| Melt | 11.38% |
+| Precip 30d | 8.27% |
+| Precip (raw) | 6.55% |
+| Etp (raw) | 3.27% |
+| Groundwater | 1.93% |
+
+**Two notable shifts from the pre-fix 7-feature analysis:**
+
+1. **Melt collapsed from 12.2% to 0.6%.** The 46-day NaN gap in the discharge training record falls in April–May (peak snowmelt season). Pre-fix, the model was learning that the binary `melt` feature (temp > 0) flipping from "off" to "on" coincided with a 46-day linear discharge ramp — a strong but spurious correlation driven entirely by the interpolation artifact. With the artifact masked out, the melt feature loses that learned association and Shapley correctly reports its true marginal contribution.
+2. **Precip 90d jumped from 23.4% to 33.2%.** The seasonal/slow-dynamics signal that melt was previously absorbing got reabsorbed into the long-term precipitation aggregate, which is a more generally-useful representation.
+
+The new ranking is physically more defensible for a storage-dominated catchment: short-term triggering (precip_7d 36%) plus long-term antecedent moisture (precip_90d 33%) dominate, with precip_surplus rounding out the precipitation story (15%). Together those three carry 84% of the model's explanatory share.
+
+**On the 9-feature ranking:** Precip (raw) and Etp (raw) sit at positions 7 and 8 of 9 — well below their engineered derivatives (precip_7d alone is 3.4× the importance of raw Precip; precip_surplus is 6.3× the importance of raw Etp). This supports the redundancy argument behind the 7-feature reduction, even though the original justification was made on the (broken) signed-normalization analysis where raw Precip and Etp simply *looked* smallest. The empirical validation remains the test NSE: 7-feature 0.807 vs 9-feature 0.776.
+
+**Caveat — Groundwater (1.93–2.17%):** Shapley puts this as the lowest contributor in both models, but the IG temporal panel shows it as a persistent, continuously-contributing feature. See the extended discussion in Part 7. The catchment is groundwater-controlled in a physical sense, so dropping it would be hard to justify hydrologically even if Shapley alone might suggest it.
 
 ### Bug-in-the-bug-fix moment
 
