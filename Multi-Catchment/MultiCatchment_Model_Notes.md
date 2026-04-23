@@ -263,6 +263,63 @@ The biggest improvements came from adding **static attributes** (Run 4), switchi
 - **Group5** (largest catchment) and **Group11** are the new problem children. Both have train ≈ val NSE around 0.7–0.85 but test NSE in the 0.27–0.30 range. Now that NaN masking is honest, this gap reflects real distribution shift between their training periods and test periods. Group5 in particular under-predicts major peak events visible in the test plot.
 - Training and validation loss curves now show a visible gap (train consistently lower) — a more honest picture of generalization than the previous "tracks together" appearance, which was partially flattered by the model fitting interpolated values trivially.
 
+## Leave-One-Catchment-Out (LOCO) Cross-Validation
+
+LOCO is the proper test of generalization to *unseen* catchments: for each fold, train on 5 catchments and evaluate on the 6th. Same model architecture and hyperparameters as Run 7, same NaN masking fix, same seeded training. Implemented in `B_lstm_forecaster_random_windows_LOCO.py`.
+
+### Results
+
+| Held-out catchment | Test NSE |
+|--------------------|----------|
+| Group1 | -2.55 |
+| Group2 | -2.04 |
+| Group11 | -1.22 |
+| Group5 | -0.12 |
+| Group7 | +0.10 |
+| Group3 | +0.47 |
+
+Training and validation loss curves looked similar across folds (train ~0.12–0.20, val ~0.22–0.34) — the model successfully fits the 5 training catchments in each fold. The held-out catchment never enters the loss function during training.
+
+### Static-attribute analysis: testing the "extremes fail" hypothesis
+
+Initial intuition: catchments at the extremes of the static-attribute distribution should fail worst because the embedding has no nearby training neighbors to interpolate from. The data does **not** support this:
+
+| Catchment | NSE | Dist from mean (z-space) | Max \|z\| | Nearest-neighbor dist | Most extreme attribute |
+|-----------|-----|--------------------------|-----------|------------------------|------------------------|
+| Group1 | -2.55 | 2.08 | 1.13 | 1.92 | rural% (-1.13) |
+| Group2 | -2.04 | 2.47 | 1.52 | 2.71 | rural% (+1.52) |
+| Group11 | -1.22 | **1.65** | 1.17 | 1.92 | lake% (-1.17) |
+| Group5 | -0.12 | **3.47** | **1.90** | **3.98** | area, flow path (+1.90) |
+| Group7 | +0.10 | 2.99 | 1.67 | 3.75 | urban% (-1.67) |
+| Group3 | +0.47 | 2.43 | 1.35 | 3.18 | slope (+1.35) |
+
+All three extremeness metrics correlate **positively** with LOCO NSE (r = +0.53 to +0.77), the opposite of the prediction. The catchment most isolated in attribute space (Group5) achieves middling LOCO performance, while one of the catchments closest to its neighbors (Group11) performs poorly.
+
+### Tentative pattern (limited data)
+
+A weaker pattern is visible if you look at *which kind* of attribute is extreme:
+
+- **Catchments that fail (Group1, Group2, Group11)** are most extreme on a **land-use** attribute (rural, nature, lake).
+- **Catchments that work (Group3, Group5, Group7)** are most extreme on a **topographic** attribute (slope, elevation, area, flow path).
+
+A coherent hypothesis: the model has learned that topographic attributes meaningfully shape hydrologic response (small catchments respond faster, etc.) and can extrapolate when held-out catchments are topographically distinctive. It treats land-use attributes more like an arbitrary catchment ID — useful for fitting the trained catchments, useless for predicting unseen ones with different land-use mixes.
+
+**Caveat:** with N=6 catchments and 8 attributes, this is barely above the noise floor. A Pearson r of 0.77 is not statistically meaningful at N=6 (95% CI for the null hypothesis r=0 is roughly ±0.81). Treat as a hypothesis worth testing, not a finding.
+
+### Broader takeaway
+
+LOCO test NSEs range from -2.55 to +0.47 with no clean attribute-space explanation for which catchments fail. With only 6 catchments, the static-attribute embedding has insufficient data to learn smooth attribute-to-behavior mappings — published regional LSTM hydrology models (e.g. Kratzert et al. 2019) typically use 500+ catchments to make static attributes generalize meaningfully. The N=6 setup cannot distinguish "genuine attribute-driven differences" from "arbitrary catchment-specific behavior the model memorized."
+
+**The joint multi-catchment model from Run 7 is therefore a *joint training* model, not a *regional generalization* model.** It is a useful tool for predicting the 6 specific catchments it was trained on (test NSEs 0.27–0.85) but cannot be relied on to predict an unseen catchment from its static attributes alone.
+
+### Diagnostic experiments worth running (not yet attempted)
+
+- **Drop land-use attributes entirely.** Train with only topographic attributes (area, elevation, slope, flow path). If LOCO numbers improve, that supports the topographic-vs-land-use hypothesis. If they don't change, it confirms N=6 is the dominant constraint.
+- **Engineered land-use ratios** (e.g. `urban / (rural + nature)`) — fewer, more physically meaningful land-use signals.
+- **PCA the static attributes to 2–3 components** — forces the embedding to use only directions of meaningful variance, reduces over-parameterization.
+
+A "dominant land-use" binary categorical was considered and rejected: all 6 catchments are rural-dominated (rural% is the largest category in every catchment), so a categorical of the dominant class would produce identical values for every catchment.
+
 ## Script Structure
 
 | Script | Purpose |
@@ -271,6 +328,7 @@ The biggest improvements came from adding **static attributes** (Run 4), switchi
 | B_lstm_forecaster.py | Data loading functions, scaling, loss functions (used as import by other scripts). Also contains a full Approach 2 training loop. |
 | B_lstm_forecaster_scheduler.py | Training script with LR search + CyclicLR scheduler (Approach 2) |
 | B_lstm_forecaster_random_windows.py | Training script with random window sampling + CyclicLR scheduler (Approach 3) |
+| B_lstm_forecaster_random_windows_LOCO.py | LOCO cross-validation: trains 6 separate models, each holding out one catchment as the test set |
 | C_ModelEvaluation.py | Load saved weights, compute NSE per catchment, generate diagnostic plots |
 | model.py | LSTM architecture with optional static attribute embedding |
 
@@ -279,7 +337,7 @@ The biggest improvements came from adding **static attributes** (Run 4), switchi
 - Add temperature data where available (Group11 already has it)
 - Add groundwater data where available
 - Sample multiple windows per catchment per batch (currently 1) for more stable gradients
-- Cross-validation: train on 5 catchments, test on the 6th to evaluate true generalization to unseen catchments
 - Experiment with model size (nhidden=32 vs 64)
 - Try different window sizes (e.g. 2 years vs 4 years of training per window)
-- Investigate why some catchments have weak test performance despite strong validation
+- Investigate why some catchments have weak test performance despite strong validation (Group5, Group11 — likely distribution shift in test period; cross-check via shared chronological test window)
+- LOCO diagnostic experiments: drop land-use attributes; engineered land-use ratios; PCA-compressed static inputs (see LOCO section)
