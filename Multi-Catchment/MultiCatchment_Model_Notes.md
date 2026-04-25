@@ -320,6 +320,65 @@ LOCO test NSEs range from -2.55 to +0.47 with no clean attribute-space explanati
 
 A "dominant land-use" binary categorical was considered and rejected: all 6 catchments are rural-dominated (rural% is the largest category in every catchment), so a categorical of the dominant class would produce identical values for every catchment.
 
+## Cross-Technique Comparison (Part 4, Steps 19–20)
+
+This section steps back from the multi-catchment model alone and compares all three modelling techniques developed across the course on the Group2 (Havelse) test period (2022-01-01 to 2023-12-31). Full comparison code is in `Model_Comparisons/ModelComparison.py`.
+
+### Performance comparison
+
+| Model | Linear NSE |
+|---|---|
+| HBV (medium bucket model, Part 2) | **0.882** |
+| LSTM multi-catchment (Run 7, this folder) | 0.837 |
+| LSTM single-catchment (Part 3) | 0.808 |
+| HIP (National Water Resources Model) | 0.498 |
+| LSTM LOCO (logspace, held-out) | -1.06 |
+
+**The headline result: HBV (the simplest of the three techniques) outperforms both LSTMs on this catchment.** That contradicts the typical "more sophisticated = better" assumption and is worth foregrounding rather than burying.
+
+Plausible reasons HBV wins here:
+- HBV is calibrated specifically for Havelse (per-catchment), like the single-LSTM, but with strong physical inductive bias.
+- ~20 years of data is plenty for HBV's ~12 parameters but probably not enough for an LSTM to clearly beat a well-tuned mechanistic model. Published multi-catchment LSTMs (Kratzert et al. 2019, ~530 CAMELS catchments) outperform HBV-style models, but they need an order of magnitude more data than we have.
+- HBV operates at 12-h resolution; the LSTMs at daily — slight edge on rising-limb dynamics.
+
+**HIP underperforms** because it's calibrated as a national model with regional parameters — not Havelse-specific tuning. Same general explanation as the LOCO case on the LSTM side: any model not tuned to a specific catchment underperforms one that is.
+
+### Why the multi-LSTM beats the single-LSTM
+
+The multi-catchment model edges out the single-catchment model on Havelse (0.837 vs 0.808). Small effect, but the direction is interesting: pooling data across 6 catchments seems to have *regularized* the model and prevented some overfitting to Havelse-specific quirks. So multi-catchment training has merit even when Havelse is the target catchment.
+
+### Residual highlights across models
+
+- **Single-LSTM**: residuals largely well-behaved; the only meaningful structure is mild groundwater dependence (r = 0.19 — see C script residuals-vs-inputs figure).
+- **Multi-LSTM**: similar shape to single-LSTM, slightly worse on extremes.
+- **LOCO (logspace)**: log-space training fixed the residual *shape* (approximately normal) but not the *bias* (~4.5× over-prediction in linear space, log-residual mean ≈ -1.5). The bias is structural — the model has never seen Group 2's catchment-specific behavior — not transformable away by a label transformation.
+
+### Step 20: benefit / limitation per technique
+
+**Bucket model (HBV)**
+- ✅ **Benefit:** physically interpretable parameters and states (snow storage, soil moisture, fast/slow reservoirs). When something looks wrong, you can plot internal states and reason about what's broken. Strong inductive bias when data is limited.
+- ❌ **Limitation:** rigid structure. Adding non-standard inputs (groundwater observations, snowpack, anthropogenic withdrawals) requires re-engineering the model rather than appending a feature column.
+
+**Single-catchment ML (LSTM)**
+- ✅ **Benefit:** flexible feature ingestion — anything time-series can become an input without architectural redesign. Captures non-linear interactions the bucket can't represent.
+- ❌ **Limitation:** less directly interpretable than HBV. Shapley analysis (D script) partially probes the model, but it's not as transparent as inspecting reservoir states. Needs substantial catchment-specific data and doesn't transfer to other catchments.
+
+**Multi-catchment ML (LSTM with static features)**
+- ✅ **Benefit:** pools data across catchments and *can* generalize to ungauged catchments via static features — that's the entire selling point.
+- ❌ **Limitation:** with N=6 catchments, the static-feature embedding has insufficient data to encode meaningful generalization (see LOCO section above). Per-catchment performance on trained catchments is only a small compromise; performance on truly unseen catchments degrades severely (LOCO Group 2: ~4.5× bias).
+
+### Framing for the writeup
+
+The five NSE values — HBV (0.882) > multi-LSTM (0.837) > single-LSTM (0.808) > HIP (0.498) > LOCO (-1.06) — map onto a clean axis: **how much catchment-specific calibration the model has access to**. HBV has the most; LOCO has the least; the others sit between. That framing connects the empirical results to the structural limitation each technique has, which is what step 20 is asking for.
+
+A note on dominance: equal performance between HBV and the LSTMs would still favor HBV here, because HBV is more interpretable. The opaque model only earns its keep when it delivers clearly better predictions. On Havelse with ~20 years of data, it doesn't.
+
+### Caveats worth noting in the oral exam
+
+- **HBV is conceptually physical, not actually physical.** The structure mirrors hydrology, but the parameters are still data-fit. The advantage is the inductive bias of the structure, not that the parameters were physically measured.
+- **The "more data → LSTM wins" hypothesis** is supported by published work (Kratzert et al. 2019, multi-basin LSTM on the CAMELS dataset), not just speculation.
+- **Six catchments is an order of magnitude too few** to make LOCO competitive with locally-calibrated models. Once you scale to ~100+ catchments, LOCO performance becomes respectable. The N=6 constraint is the binding factor here, not the architecture.
+
 ## Script Structure
 
 | Script | Purpose |

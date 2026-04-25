@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from statsmodels.graphics.tsaplots import plot_acf 
 import datetime as dt 
 import os 
+import pandas as pd 
 
 #Create folder where all figures are saved 
 figures_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures')
@@ -50,17 +51,14 @@ pred_test = pred_all[:, n_train+n_val:]
 
 #Unscale output
 #training
-rainseries_train = unscale_series(inputs_train[0,:,0],inputscales).numpy()
 flowpred_train = unscale_series(pred_train[0,:],labelscales).numpy()
 flowobs_train = unscale_series(labels_train[0,:],labelscales).numpy()
 
 #Validation 
-rainseries_val = unscale_series(inputs_val[0,:,0],inputscales).numpy()
 flowpred_val = unscale_series(pred_val[0,:],labelscales).numpy()
 flowobs_val = unscale_series(labels_val[0,:],labelscales).numpy()
 
 #Test 
-rainseries_test = unscale_series(inputs_test[0,:,0],inputscales).numpy()
 flowpred_test = unscale_series(pred_test[0,:],labelscales).numpy()
 flowobs_test = unscale_series(labels_test[0,:],labelscales).numpy()
 
@@ -75,15 +73,27 @@ np.save('observations_test.npy', flowobs_test)
 nse_train = nse(flowobs_train, flowpred_train)
 print(f'Training NSE: {nse_train:3f}')
 
+#want to plot raw precip for each period to show with predictions 
+raw_data = pd.read_csv('Data/LSTM_dataframe.csv', index_col=0, parse_dates=True)
+precip_daily = raw_data['precipitation'].values
+precip_train = precip_daily[:n_train]
+precip_val   = precip_daily[n_train:n_train+n_val]
+precip_test  = precip_daily[n_train+n_val:]
+
+#Add date slices to include in figures (showing no. days currently)
+dates_train = raw_data.index[:n_train]
+dates_val   = raw_data.index[n_train:n_train+n_val]
+dates_test  = raw_data.index[n_train+n_val:]
+
 #PLot training predictions
 fig,ax = plt.subplots(nrows=2)
-ax[0].plot(rainseries_train)
+ax[0].plot(dates_train, precip_train)
 ax[0].set_ylabel('Rainfall [mm/d]')
 ax[0].set_title(f'Training period (NSE = {nse_train:.3f})')
-ax[1].plot(flowobs_train, label='Observed')
-ax[1].plot(flowpred_train, label='Predicted')
+ax[1].plot(dates_train, flowobs_train, label='Observed')
+ax[1].plot(dates_train, flowpred_train, label='Predicted')
 ax[1].set_ylabel('Flow [mm/d]')
-ax[1].set_xlabel('Time [days]')
+ax[1].set_xlabel('Date')
 ax[1].legend()
 fig.savefig(os.path.join(figures_dir, 'lstm_training_predictions.png'), dpi=150)
 
@@ -93,13 +103,13 @@ print(f'Validation NSE: {nse_val:3f}')
 
 #PLot Validation predictions 
 fig,ax = plt.subplots(nrows=2)
-ax[0].plot(rainseries_val)
+ax[0].plot(dates_val, precip_val)
 ax[0].set_ylabel('Rainfall [mm/d]')
 ax[0].set_title(f'Validation period (NSE = {nse_val:.3f})')
-ax[1].plot(flowobs_val, label='Observed')
-ax[1].plot(flowpred_val, label='Predicted')
+ax[1].plot(dates_val, flowobs_val, label='Observed')
+ax[1].plot(dates_val, flowpred_val, label='Predicted')
 ax[1].set_ylabel('Flow [mm/d]')
-ax[1].set_xlabel('Time [days]')
+ax[1].set_xlabel('Date')
 ax[1].legend()
 fig.savefig(os.path.join(figures_dir, 'lstm_validation_predictions.png'), dpi=150)
 
@@ -109,13 +119,13 @@ print(f'Test NSE: {nse_test:.3f}')
 
 #Plot Test Predictions 
 fig,ax = plt.subplots(nrows=2)
-ax[0].plot(rainseries_test)
+ax[0].plot(dates_test, precip_test)
 ax[0].set_ylabel('Rainfall [mm/d]')
 ax[0].set_title(f'Test period (NSE = {nse_test:.3f})')
-ax[1].plot(flowobs_test, label='Observed')
-ax[1].plot(flowpred_test, label='Predicted')
+ax[1].plot(dates_test, flowobs_test, label='Observed')
+ax[1].plot(dates_test, flowpred_test, label='Predicted')
 ax[1].set_ylabel('Flow [mm/d]')
-ax[1].set_xlabel('Time [days]')
+ax[1].set_xlabel('Date')
 ax[1].legend()
 fig.savefig(os.path.join(figures_dir, 'lstm_test_predictions.png'), dpi=150)
 
@@ -132,10 +142,10 @@ fig.savefig(os.path.join(figures_dir, 'Histogram_residuals.png'), dpi=150)
 
 #Plot residuals over time to check for white noise
 fig, ax = plt.subplots()
-ax.plot(residuals, color = 'steelblue', linewidth = 0.5)
+ax.plot(dates_val, residuals, color = 'steelblue', linewidth = 0.5)
 ax.axhline(0, color = 'red', linestyle = '--', linewidth =1)
 ax.set_xlabel('Time [days]')
-ax.set_ylabel('Residual [mm/d]')
+ax.set_ylabel('Date')
 ax.set_title('Residuals over time')
 fig.savefig(os.path.join(figures_dir, 'Residuals_timeseries.png'), dpi=150)
 
@@ -156,6 +166,54 @@ colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728','#9467bd', '#8c564b', '#e37
 for patch, color in zip(bp['boxes'], colors):
     patch.set_facecolor(color)
 fig.savefig(os.path.join(figures_dir, 'boxandwhisker.png'), dpi=150)
+
+#Plot residuals vs each input feature
+#A correlation between residuals and an input means the model isn't fully extracting that input's signal. 
+#Computed on the validation period
+fig, axes = plt.subplots(nrows=2, ncols=4, figsize=(16, 7))
+axes = axes.flatten()
+for i, fname in enumerate(var_names):
+    feature_val = unscale_series(inputs_val[0,:,i], inputscales).numpy()
+    r = np.corrcoef(feature_val, residuals)[0, 1]
+    axes[i].scatter(feature_val, residuals, alpha=0.3, s=8)
+    axes[i].axhline(0, color='red', linestyle='--', linewidth=1)
+    axes[i].set_xlabel(fname)
+    axes[i].set_ylabel('Residual [mm/d]')
+    axes[i].set_title(f'{fname}  (r = {r:.3f})')
+axes[7].axis('off')   # only 7 features, hide the 8th panel
+fig.suptitle('Validation residuals vs input features', y=1.02)
+fig.tight_layout()
+fig.savefig(os.path.join(figures_dir, 'residuals_vs_inputs.png'), dpi=150)
+
+#Combined plot: train, val, test predictions stacked vertically
+fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(12, 9))
+
+axes[0].plot(dates_train, flowobs_train, label='Observed', linewidth=0.8)
+axes[0].plot(dates_train, flowpred_train, label='Predicted', linewidth=0.8)
+axes[0].set_ylabel('Flow [mm/d]')
+axes[0].set_title(f'Training (NSE = {nse_train:.3f})')
+axes[0].legend(loc='upper right')
+axes[0].grid(alpha=0.3)
+
+axes[1].plot(dates_val, flowobs_val, label='Observed', linewidth=0.8)
+axes[1].plot(dates_val, flowpred_val, label='Predicted', linewidth=0.8)
+axes[1].set_ylabel('Flow [mm/d]')
+axes[1].set_title(f'Validation (NSE = {nse_val:.3f})')
+axes[1].legend(loc='upper right')
+axes[1].grid(alpha=0.3)
+
+axes[2].plot(dates_test, flowobs_test, label='Observed', linewidth=0.8)
+axes[2].plot(dates_test, flowpred_test, label='Predicted', linewidth=0.8)
+axes[2].set_ylabel('Flow [mm/d]')
+axes[2].set_xlabel('Date')
+axes[2].set_title(f'Test (NSE = {nse_test:.3f})')
+axes[2].legend(loc='upper right')
+axes[2].grid(alpha=0.3)
+
+fig.suptitle('LSTM 9-feature - Predictions across all periods', y=1.00)
+fig.tight_layout()
+fig.savefig(os.path.join(figures_dir, 'lstm_all_periods_predictions.png'), dpi=150)
+
 
 plt.show()
 
