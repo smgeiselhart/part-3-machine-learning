@@ -31,6 +31,16 @@ test_catchment_name = 'Group2'
 test_catchment = next(c for c in catchment_data if c['name'] == test_catchment_name)
 train_catchments = [c for c in catchment_data if c['name'] != test_catchment_name]
 
+# Match the log-space training: log-transform labels before scaling
+non_zero = 1e-3
+for c in train_catchments:
+    c['labels_train'] = torch.log(c['labels_train'] + non_zero)
+    c['labels_val']   = torch.log(c['labels_val']   + non_zero)
+    c['labels_test']  = torch.log(c['labels_test']  + non_zero)
+test_catchment['labels_train'] = torch.log(test_catchment['labels_train'] + non_zero)
+test_catchment['labels_val']   = torch.log(test_catchment['labels_val']   + non_zero)
+test_catchment['labels_test']  = torch.log(test_catchment['labels_test']  + non_zero)
+
 #Set number of static inputs 
 n_static = 8
 
@@ -57,8 +67,9 @@ test_catchment['static_scaled'] = (test_catchment['static'] - static_mean) / sta
 
 #Load the trained model (done in B script - LOCO)
 model = LSTMModel(ninputs,nhidden,1,nlayers,0, n_static = n_static)
-#Load the Weights - pick which .csv based on the forecaster used!! 
-model.load_state_dict(torch.load(os.path.join(weights_dir, f'weights_LOCO_{test_catchment_name}.csv')))
+#Load the Weights - pick which .csv based on the forecaster used!! or use the logspace weights 
+model.load_state_dict(torch.load(os.path.join(weights_dir, f'weights_LOCO_{test_catchment_name}_logspace.csv')))
+
 model.eval()
 
 #Evaluate each Group 2 catchment 
@@ -82,23 +93,34 @@ pred_train = pred_all[:, :n_train]
 pred_val = pred_all[:, n_train:n_train+n_val]
 pred_test = pred_all[:, n_train+n_val:]
 
-#Unscale output
+#Unscale output - use when not in log tranformed space! 
 #training
-flowpred_train = unscale_series(pred_train[0,:],labelscales).numpy()
-flowobs_train = unscale_series(c['labels_train'][0,:],labelscales).numpy()
-rainseries_train = unscale_series(c['inputs_train'][0,:,0], inputscales).numpy()
+# flowpred_train = unscale_series(pred_train[0,:],labelscales).numpy()
+# flowobs_train = unscale_series(c['labels_train'][0,:],labelscales).numpy()
+# rainseries_train = unscale_series(c['inputs_train'][0,:,0], inputscales).numpy()
 
-#Validation 
-flowpred_val = unscale_series(pred_val[0,:],labelscales).numpy()
-flowobs_val = unscale_series(c['labels_val'][0,:],labelscales).numpy()
+# #Validation 
+# flowpred_val = unscale_series(pred_val[0,:],labelscales).numpy()
+# flowobs_val = unscale_series(c['labels_val'][0,:],labelscales).numpy()
+# rainseries_val = unscale_series(c['inputs_val'][0,:,0], inputscales).numpy()
+
+# #Test 
+# flowpred_test = unscale_series(pred_test[0,:],labelscales).numpy()
+# flowobs_test = unscale_series(c['labels_test'][0,:],labelscales).numpy()
+# rainseries_test = unscale_series(c['inputs_test'][0,:,0], inputscales).numpy()
+
+#Unscale output - use when in log transformed space! 
+flowpred_train = np.exp(unscale_series(pred_train[0,:], labelscales).numpy()) - non_zero
+flowobs_train  = np.exp(unscale_series(c['labels_train'][0,:], labelscales).numpy()) - non_zero
+rainseries_train = unscale_series(c['inputs_train'][0,:,0], inputscales).numpy()  # inputs unchanged
+
+flowpred_val = np.exp(unscale_series(pred_val[0,:], labelscales).numpy()) - non_zero
+flowobs_val  = np.exp(unscale_series(c['labels_val'][0,:], labelscales).numpy()) - non_zero
 rainseries_val = unscale_series(c['inputs_val'][0,:,0], inputscales).numpy()
 
-
-#Test 
-flowpred_test = unscale_series(pred_test[0,:],labelscales).numpy()
-flowobs_test = unscale_series(c['labels_test'][0,:],labelscales).numpy()
+flowpred_test = np.exp(unscale_series(pred_test[0,:], labelscales).numpy()) - non_zero
+flowobs_test  = np.exp(unscale_series(c['labels_test'][0,:], labelscales).numpy()) - non_zero
 rainseries_test = unscale_series(c['inputs_test'][0,:,0], inputscales).numpy()
-
 
 ######### EVALUATION ###########
 #Calculate the NSE on training 
@@ -197,8 +219,9 @@ test_predictions = pd.DataFrame({
     'observed_m3s':  flowobs_test  * CATCHMENT_AREA_M2 / 1000 / 86400,
 }, index=dates_test)
 test_predictions.index.name = 'date'
+#test_predictions.to_csv(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Data/Group2/Group2_LOCO_test_predictions.csv'))
 test_predictions.to_csv(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                     'Data/Group2/Group2_LOCO_test_predictions.csv'))
+                                     'Data/Group2/Group2_LOCO_logspace_test_predictions.csv'))
 print(f'\nSaved: Data/Group2/Group2_LOCO_test_predictions.csv')
 
 
