@@ -184,8 +184,8 @@ def run_fold(test_catchment_name):
     #Unscale when training was performed in log transformed space 
     pred_log = unscale_series(pred_test[0, window_warmup:], labelscales).numpy()
     obs_log  = unscale_series(test_labels_scaled[0, window_warmup:], labelscales).numpy()
-    pred_phys = np.exp(pred_log) - eps   # back to linear mm/d
-    obs_phys  = np.exp(obs_log)  - eps
+    pred_phys = np.exp(pred_log) - non_zero   # back to linear mm/d
+    obs_phys  = np.exp(obs_log)  - non_zero
     test_nse  = nse(obs_phys, pred_phys)
     print(f'[{test_catchment_name}] Test NSE (logspace training, linear NSE): {test_nse:.3f}')
 
