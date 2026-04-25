@@ -65,6 +65,14 @@ def run_fold(test_catchment_name):
     test_inputs = torch.cat([test_catchment['inputs_train'], test_catchment['inputs_val'], test_catchment['inputs_test']], dim=1)
     test_labels = torch.cat([test_catchment['labels_train'], test_catchment['labels_val'], test_catchment['labels_test']], dim=1)
 
+    #Log transform labels and train in transformed space bc residuals are not normally distributed 
+    #add non-zero to avoid log(0)
+    non_zero = 1e-3
+    for c in train_catchments: 
+        c['labels_train'] = torch.log(c['labels_train'] + non_zero)
+        c['labels_val']   = torch.log(c['labels_val']   + non_zero)
+    test_labels = torch.log(test_labels + non_zero)
+
     #Compute input and label scales from the 5 training catchments ONLY 
     all_inputs_train = torch.cat([c['inputs_train'] for c in train_catchments], dim=1)
     all_labels_train = torch.cat([c['labels_train'] for c in train_catchments], dim=1)
@@ -150,23 +158,37 @@ def run_fold(test_catchment_name):
 
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            torch.save(model.state_dict(), os.path.join(weights_dir, f'weights_LOCO_{test_catchment_name}.csv'))
-
+            #Use when NOT log transforming labels 
+            #torch.save(model.state_dict(), os.path.join(weights_dir, f'weights_LOCO_{test_catchment_name}.csv'))
+            #Use when tranforming labels 
+            torch.save(model.state_dict(), os.path.join(weights_dir, f'weights_LOCO_{test_catchment_name}_logspace.csv'))
         if epoch % 100 == 0:
             print(f'[{test_catchment_name}] Epoch {epoch}: train={loss.item():.4f}, val={avg_val_loss:.4f}')
 
     #################################################################
     # Load best weights for this fold and evaluate on held-out test catchment
-    model.load_state_dict(torch.load(os.path.join(weights_dir, f'weights_LOCO_{test_catchment_name}.csv')))
+    # model.load_state_dict(torch.load(os.path.join(weights_dir, f'weights_LOCO_{test_catchment_name}.csv')))
+    # Use when loading weights for log transformed model 
+    model.load_state_dict(torch.load(os.path.join(weights_dir, f'weights_LOCO_{test_catchment_name}_logspace.csv')))
+
     model.eval()
     with torch.no_grad():
         pred_test = model(test_inputs_scaled, test_static_scaled.unsqueeze(0))
 
-    pred_phys = unscale_series(pred_test[0, window_warmup:], labelscales).numpy()
-    obs_phys  = unscale_series(test_labels_scaled[0, window_warmup:], labelscales).numpy()
-    test_nse  = nse(obs_phys, pred_phys)
-    print(f'[{test_catchment_name}] Test NSE: {test_nse:.3f}')
+    #Unscale when training in non-transformed space 
+    # pred_phys = unscale_series(pred_test[0, window_warmup:], labelscales).numpy()
+    # obs_phys  = unscale_series(test_labels_scaled[0, window_warmup:], labelscales).numpy()
+    # test_nse  = nse(obs_phys, pred_phys)
+    # print(f'[{test_catchment_name}] Test NSE: {test_nse:.3f}')
     
+    #Unscale when training was performed in log transformed space 
+    pred_log = unscale_series(pred_test[0, window_warmup:], labelscales).numpy()
+    obs_log  = unscale_series(test_labels_scaled[0, window_warmup:], labelscales).numpy()
+    pred_phys = np.exp(pred_log) - eps   # back to linear mm/d
+    obs_phys  = np.exp(obs_log)  - eps
+    test_nse  = nse(obs_phys, pred_phys)
+    print(f'[{test_catchment_name}] Test NSE (logspace training, linear NSE): {test_nse:.3f}')
+
     
     #################################################################
     # Plot training history
@@ -195,4 +217,5 @@ if __name__ == '__main__':
     df = pd.DataFrame({'catchment': list(results.keys()),
                        'test_nse':  list(results.values())})
     print('\n' + df.to_string(index=False))
-    df.to_csv(os.path.join(data_dir, 'loco_cv_results.csv'), index=False)
+    #df.to_csv(os.path.join(data_dir, 'loco_cv_results.csv'), index=False)
+    df.to_csv(os.path.join(data_dir, 'loco_cv_results_logspace.csv'), index=False)
