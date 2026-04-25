@@ -137,7 +137,7 @@ ax[1].plot(flowpred_train, label='Predicted')
 ax[1].set_ylabel('Flow [mm/d]')
 ax[1].set_xlabel('Time [days]')
 ax[1].legend()
-fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_training_predictions.png'), dpi=150)
+fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_training_predictions_logspace.png'), dpi=150)
 plt.close()
 
 #Calculate NSE on validation set, 1 = perfect, 0 = no better than predicting the mean
@@ -154,7 +154,7 @@ ax[1].plot(flowpred_val, label='Predicted')
 ax[1].set_ylabel('Flow [mm/d]')
 ax[1].set_xlabel('Time [days]')
 ax[1].legend()
-fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_validation_predictions.png'), dpi=150)
+fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_validation_predictions_logspace.png'), dpi=150)
 plt.close()
 
 #Calcualte NSE on test period 
@@ -171,20 +171,20 @@ ax[1].plot(flowpred_test, label='Predicted')
 ax[1].set_ylabel('Flow [mm/d]')
 ax[1].set_xlabel('Time [days]')
 ax[1].legend()
-fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_test_predictions.png'), dpi=150)
+fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_test_predictions_logspace.png'), dpi=150)
 plt.close()
 
-#Check Residuals 
+#Check Residuals - must happen in tranformed space! 
 #Plot histogram of residuals on validation period to confirm if normally distributed
-residuals = flowobs_val - flowpred_val
+residuals = np.log(flowobs_val + non_zero) - np.log(flowpred_val + non_zero)
 fig, ax = plt.subplots()
 ax.hist(residuals, bins=50)
 ax.axvline(0, color='red', linestyle='--', label='Zero')
-ax.set_xlabel('Residual [mm/d]')
+ax.set_xlabel('Log-Transformed Residual [mm/d]')
 ax.set_ylabel('No. of occurences')
 ax.set_title(f'{name} LOCO - Residual Histogram')
 ax.legend()
-fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_residuals_histogram.png'), dpi=150)
+fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_residuals_histogram_logspace.png'), dpi=150)
 plt.close()
 
 #Plot residuals over time to check for white noise
@@ -192,9 +192,9 @@ fig, ax = plt.subplots()
 ax.plot(residuals, color = 'steelblue', linewidth = 0.5)
 ax.axhline(0, color = 'red', linestyle = '--', linewidth =1)
 ax.set_xlabel('Time [days]')
-ax.set_ylabel('Residual [mm/d]')
+ax.set_ylabel('Log-Transformed Residual [mm/d]')
 ax.set_title('Residuals over time (LOCO)')
-fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_Residuals_timeseries.png'), dpi=150)
+fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_Residuals_timeseries_logspace.png'), dpi=150)
 plt.close()
 
 #PLot autocorrelation function 
@@ -203,7 +203,7 @@ plot_acf(residuals, lags=60, ax=ax)
 ax.set_xlabel('Lag [days]')
 ax.set_ylabel('Autocorrelation')
 ax.set_title(f'{name} - ACF of Residuals (LOCO)')
-fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_residuals_acf.png'), dpi=150)
+fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_residuals_acf_logspace.png'), dpi=150)
 plt.close()
 
 #Save Group 2 test predictions in m3/s for model comparison 

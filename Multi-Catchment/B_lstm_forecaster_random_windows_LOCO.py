@@ -201,7 +201,7 @@ def run_fold(test_catchment_name):
     axes[1].set_ylabel('Learning Rate')
     axes[1].set_xlabel('Epoch')
     plt.tight_layout()
-    fig.savefig(os.path.join(figures_dir, f'lstm_training_history_LOCO_{test_catchment_name}.png'), dpi=150)
+    fig.savefig(os.path.join(figures_dir, f'lstm_training_history_LOCO{test_catchment_name}.png'), dpi=150)
 
     plt.close(fig)
 
