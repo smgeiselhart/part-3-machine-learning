@@ -121,8 +121,10 @@ ax[1].legend()
 fig.savefig(os.path.join(figures_dir, 'lstm_test_predictions.png'), dpi=150)
 
 #Check Residuals 
-#Plot histogram of residuals on validation period to confirm if normally distributed
 residuals = flowobs_val - flowpred_val
+var_names = ['precip_30d', 'precip_7d', 'precip_90d', 'precip_surplus', 'temp', 'groundwater', 'melt']
+
+#Plot histogram of residuals on validation period to confirm if normally distributed
 fig, ax = plt.subplots()
 ax.hist(residuals, bins=50)
 ax.axvline(0, color='red', linestyle='--', label='Zero')
@@ -148,9 +150,26 @@ ax.set_ylabel('Autocorrelation')
 ax.set_title('ACF of residuals')
 fig.savefig(os.path.join(figures_dir, 'residuals_acf.png'), dpi=150)
 
+#Plot residuals vs each input feature
+#A correlation between residuals and an input means the model isn't fully extracting that input's signal. 
+#Computed on the validation period
+fig, axes = plt.subplots(nrows=2, ncols=4, figsize=(16, 7))
+axes = axes.flatten()
+for i, fname in enumerate(var_names):
+    feature_val = unscale_series(inputs_val[0,:,i], inputscales).numpy()
+    r = np.corrcoef(feature_val, residuals)[0, 1]
+    axes[i].scatter(feature_val, residuals, alpha=0.3, s=8)
+    axes[i].axhline(0, color='red', linestyle='--', linewidth=1)
+    axes[i].set_xlabel(fname)
+    axes[i].set_ylabel('Residual [mm/d]')
+    axes[i].set_title(f'{fname}  (r = {r:.3f})')
+axes[7].axis('off')   # only 7 features, hide the 8th panel
+fig.suptitle('Validation residuals vs input features', y=1.02)
+fig.tight_layout()
+fig.savefig(os.path.join(figures_dir, 'residuals_vs_inputs.png'), dpi=150)
+
 #Create box & whisker plot of features 
 data_bw = inputs_train.squeeze(0).numpy() #shape = (timesteps, 7)
-var_names = ['precip_30d', 'precip_7d', 'precip_90d', 'precip_surplus', 'temp', 'groundwater', 'melt']
 fig, ax = plt.subplots(figsize = (10,5))
 bp = ax.boxplot(data_bw, tick_labels = var_names, patch_artist = True, showfliers = True)
 colors = ['#2ca02c', '#d62728','#9467bd', '#8c564b', '#e377c2', '#7f7f7f','#17becf']
