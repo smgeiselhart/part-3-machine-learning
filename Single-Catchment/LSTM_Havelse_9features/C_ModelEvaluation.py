@@ -170,7 +170,7 @@ fig.savefig(os.path.join(figures_dir, 'boxandwhisker.png'), dpi=150)
 #Plot residuals vs each input feature
 #A correlation between residuals and an input means the model isn't fully extracting that input's signal. 
 #Computed on the validation period
-fig, axes = plt.subplots(nrows=2, ncols=4, figsize=(16, 7))
+fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(16, 7))
 axes = axes.flatten()
 for i, fname in enumerate(var_names):
     feature_val = unscale_series(inputs_val[0,:,i], inputscales).numpy()
@@ -180,7 +180,6 @@ for i, fname in enumerate(var_names):
     axes[i].set_xlabel(fname)
     axes[i].set_ylabel('Residual [mm/d]')
     axes[i].set_title(f'{fname}  (r = {r:.3f})')
-axes[7].axis('off')   # only 7 features, hide the 8th panel
 fig.suptitle('Validation residuals vs input features', y=1.02)
 fig.tight_layout()
 fig.savefig(os.path.join(figures_dir, 'residuals_vs_inputs.png'), dpi=150)
