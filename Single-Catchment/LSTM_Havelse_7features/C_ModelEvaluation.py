@@ -51,17 +51,14 @@ pred_test = pred_all[:, n_train+n_val:]
 
 #Unscale output
 #training
-rainseries_train = unscale_series(inputs_train[0,:,0],inputscales).numpy()
 flowpred_train = unscale_series(pred_train[0,:],labelscales).numpy()
 flowobs_train = unscale_series(labels_train[0,:],labelscales).numpy()
 
 #Validation 
-rainseries_val = unscale_series(inputs_val[0,:,0],inputscales).numpy()
 flowpred_val = unscale_series(pred_val[0,:],labelscales).numpy()
 flowobs_val = unscale_series(labels_val[0,:],labelscales).numpy()
 
 #Test 
-rainseries_test = unscale_series(inputs_test[0,:,0],inputscales).numpy()
 flowpred_test = unscale_series(pred_test[0,:],labelscales).numpy()
 flowobs_test = unscale_series(labels_test[0,:],labelscales).numpy()
 
@@ -76,15 +73,27 @@ np.save('observations_test.npy', flowobs_test)
 nse_train = nse(flowobs_train, flowpred_train)
 print(f'Training NSE: {nse_train:3f}')
 
+#want to plot raw precip for each period to show with predictions 
+raw_data = pd.read_csv('Data/LSTM_dataframe.csv', index_col=0, parse_dates=True)
+precip_daily = raw_data['precipitation'].values
+precip_train = precip_daily[:n_train]
+precip_val   = precip_daily[n_train:n_train+n_val]
+precip_test  = precip_daily[n_train+n_val:]
+
+#Add date slices to include in figures (showing no. days currently)
+dates_train = raw_data.index[:n_train]
+dates_val   = raw_data.index[n_train:n_train+n_val]
+dates_test  = raw_data.index[n_train+n_val:]
+
 #PLot training predictions
 fig,ax = plt.subplots(nrows=2)
-ax[0].plot(rainseries_train)
+ax[0].plot(dates_train, precip_train)
 ax[0].set_ylabel('Rainfall [mm/d]')
 ax[0].set_title(f'Training period (NSE = {nse_train:.3f})')
-ax[1].plot(flowobs_train, label='Observed')
-ax[1].plot(flowpred_train, label='Predicted')
+ax[1].plot(dates_train, flowobs_train, label='Observed')
+ax[1].plot(dates_train, flowpred_train, label='Predicted')
 ax[1].set_ylabel('Flow [mm/d]')
-ax[1].set_xlabel('Time [days]')
+ax[1].set_xlabel('Date')
 ax[1].legend()
 fig.savefig(os.path.join(figures_dir, 'lstm_training_predictions.png'), dpi=150)
 
@@ -94,13 +103,13 @@ print(f'Validation NSE: {nse_val:3f}')
 
 #PLot Validation predictions 
 fig,ax = plt.subplots(nrows=2)
-ax[0].plot(rainseries_val)
+ax[0].plot(dates_val, precip_val)
 ax[0].set_ylabel('Rainfall [mm/d]')
 ax[0].set_title(f'Validation period (NSE = {nse_val:.3f})')
-ax[1].plot(flowobs_val, label='Observed')
-ax[1].plot(flowpred_val, label='Predicted')
+ax[1].plot(dates_val, flowobs_val, label='Observed')
+ax[1].plot(dates_val, flowpred_val, label='Predicted')
 ax[1].set_ylabel('Flow [mm/d]')
-ax[1].set_xlabel('Time [days]')
+ax[1].set_xlabel('Date')
 ax[1].legend()
 fig.savefig(os.path.join(figures_dir, 'lstm_validation_predictions.png'), dpi=150)
 
@@ -110,13 +119,13 @@ print(f'Test NSE: {nse_test:.3f}')
 
 #Plot Test Predictions 
 fig,ax = plt.subplots(nrows=2)
-ax[0].plot(rainseries_test)
+ax[0].plot(dates_test, precip_test)
 ax[0].set_ylabel('Rainfall [mm/d]')
 ax[0].set_title(f'Test period (NSE = {nse_test:.3f})')
-ax[1].plot(flowobs_test, label='Observed')
-ax[1].plot(flowpred_test, label='Predicted')
+ax[1].plot(dates_test, flowobs_test, label='Observed')
+ax[1].plot(dates_test, flowpred_test, label='Predicted')
 ax[1].set_ylabel('Flow [mm/d]')
-ax[1].set_xlabel('Time [days]')
+ax[1].set_xlabel('Date')
 ax[1].legend()
 fig.savefig(os.path.join(figures_dir, 'lstm_test_predictions.png'), dpi=150)
 
@@ -181,11 +190,6 @@ plt.show()
 
 #Save test predictions in m3/s for model comparison 
 CATCHMENT_AREA_M2 = 140000000 #140km2 = 14,000 ha 
-
-df_all = pd.read_csv('Data/LSTM_dataframe.csv', sep = ',', index_col = 0, parse_dates = True)
-n = len(df_all)
-test_index = int(n * 0.90)
-dates_test = df_all.index[test_index:]
 
 test_predictions = pd.DataFrame({
     'predicted_m3s': flowpred_test * CATCHMENT_AREA_M2 / 1000 / 86400,
