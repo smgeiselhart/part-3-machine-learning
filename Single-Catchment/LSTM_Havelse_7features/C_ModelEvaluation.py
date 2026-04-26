@@ -186,6 +186,35 @@ for patch, color in zip(bp['boxes'], colors):
     patch.set_facecolor(color)
 fig.savefig(os.path.join(figures_dir, 'boxandwhisker.png'), dpi=150)
 
+#Combined plot: train, val, test predictions stacked vertically
+fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(12, 9))
+
+axes[0].plot(dates_train, flowobs_train, label='Observed', linewidth=0.8)
+axes[0].plot(dates_train, flowpred_train, label='Predicted', linewidth=0.8)
+axes[0].set_ylabel('Flow [mm/d]')
+axes[0].set_title(f'Training (NSE = {nse_train:.3f})')
+axes[0].legend(loc='upper right')
+axes[0].grid(alpha=0.3)
+
+axes[1].plot(dates_val, flowobs_val, label='Observed', linewidth=0.8)
+axes[1].plot(dates_val, flowpred_val, label='Predicted', linewidth=0.8)
+axes[1].set_ylabel('Flow [mm/d]')
+axes[1].set_title(f'Validation (NSE = {nse_val:.3f})')
+axes[1].legend(loc='upper right')
+axes[1].grid(alpha=0.3)
+
+axes[2].plot(dates_test, flowobs_test, label='Observed', linewidth=0.8)
+axes[2].plot(dates_test, flowpred_test, label='Predicted', linewidth=0.8)
+axes[2].set_ylabel('Flow [mm/d]')
+axes[2].set_xlabel('Date')
+axes[2].set_title(f'Test (NSE = {nse_test:.3f})')
+axes[2].legend(loc='upper right')
+axes[2].grid(alpha=0.3)
+
+fig.suptitle('LSTM 7-feature - Predictions across all periods', y=1.00)
+fig.tight_layout()
+fig.savefig(os.path.join(figures_dir, 'lstm_all_periods_predictions.png'), dpi=150)
+
 plt.show()
 
 #Save test predictions in m3/s for model comparison 
