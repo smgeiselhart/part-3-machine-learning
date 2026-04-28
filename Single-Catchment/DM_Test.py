@@ -14,8 +14,8 @@ obs = np.load('LSTM_Havelse_9features/observations_val.npy') #can be from either
 
 d_per_run = []
 for run_idx in range (1, N_RUNS + 1):
-    pred_9feat = np.load(f'LSTM_Havelse_9features/predictions_val_run{run_idx}.npy')
-    pred_7feat = np.load(f'LSTM_Havelse_7features/predictions_val_run{run_idx}.npy')
+    pred_9feat = np.load(f'LSTM_Havelse_9features/DM_Testruns/predictions_val_run{run_idx}.npy')
+    pred_7feat = np.load(f'LSTM_Havelse_7features/DM_Testruns/predictions_val_run{run_idx}.npy')
     d_run = (obs - pred_9feat) ** 2 - (obs - pred_7feat) ** 2
     d_per_run.append(d_run)
 
