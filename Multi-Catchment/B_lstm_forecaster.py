@@ -133,10 +133,18 @@ if __name__ == '__main__':
         c['labels_val'], _ = scale_series(c['labels_val'], labelscales)
         c['labels_test'], _ = scale_series(c['labels_test'], labelscales)
 
+    #Scale static features per-column (each attribute has different units, so one mean/std per column)
+    all_static = torch.stack([c['static'] for c in catchment_data])  #(n_catchments, 8)
+    static_mean = all_static.mean(dim = 0)
+    static_std = all_static.std(dim = 0)
+
+    for c in catchment_data:
+        c['static_scaled'] = (c['static'] - static_mean) / static_std
+
     #################################################################
     #Create model object. The model architecture is defined in model.py
     #Last value here shows the dropout rate (%)
-    model = LSTMModel(ninputs,nhidden,1,nlayers,0)
+    model = LSTMModel(ninputs,nhidden,1,nlayers,0, n_static = 8)
 
     #################################################################
     #Initialize optimizer
@@ -157,7 +165,7 @@ if __name__ == '__main__':
         #Accumulate the loss across all catchments
         total_train_loss = 0.0
         for c in catchment_data:
-            pred = model(c['inputs_train'])
+            pred = model(c['inputs_train'], static = c['static_scaled'].unsqueeze(0))
             loss = mse(pred[:,index_warmup:],c['labels_train'][:,index_warmup:])
             total_train_loss = total_train_loss + loss
         
@@ -184,7 +192,7 @@ if __name__ == '__main__':
         with torch.no_grad():
             for c in catchment_data: 
                 inputs_trainval = torch.cat([c['inputs_train'], c['inputs_val']], dim=1)
-                pred_trainval = model(inputs_trainval)
+                pred_trainval = model(inputs_trainval, static = c['static_scaled'].unsqueeze(0))
                 pred_val = pred_trainval[:, c['inputs_train'].shape[1]:]
                 total_val_loss += mse(pred_val, c['labels_val']).item()
         

@@ -48,7 +48,7 @@ for c in catchment_data:
     c['labels_test'], _ = scale_series(c['labels_test'], labelscales)
 
 #Scale static attributes 
-all_static = torch.stack([c['static'] for c in catchment_data]) #(6,6)
+all_static = torch.stack([c['static'] for c in catchment_data]) #(n_catchments=6, n_static=8)
 static_mean = all_static.mean(dim = 0)
 static_std = all_static.std(dim = 0)
 for c in catchment_data: 
@@ -61,7 +61,7 @@ for c in catchment_data:
 #################################################################
 learning_rates = [1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2]
 final_losses = []
-n_static = 6
+n_static = 8
 
 for lr in learning_rates: 
     # Create model object. The model architecture is defined in model.py

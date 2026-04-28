@@ -85,87 +85,64 @@ labels_all = torch.cat([c['labels_train'], c['labels_val'], c['labels_test']], d
 with torch.no_grad():
     pred_all = model(inputs_all, c['static_scaled'].unsqueeze(0))
 
-#Slice predictions into each dataset 
+#In LOCO, the model never trained on or validated against ANY part of this catchment.
+#The whole held-out series is the test set, so the conventional reporting is one NSE
+#computed on the full series (excluding warmup), not three NSEs on arbitrary slices.
+window_warmup = 182  # must match training script
+
+#Full held-out series, post-warmup -- this is the headline LOCO result
+pred_full = pred_all[:, window_warmup:]
+labels_full = labels_all[:, window_warmup:]
+rain_full = inputs_all[0, window_warmup:, 0]
+
+#Last-10% slice -- only kept so we can compare apples-to-apples against the
+#single-catchment / non-LOCO models that were tested on the same time window
 n_train = c['inputs_train'].shape[1]
 n_val = c['inputs_val'].shape[1]
-
-pred_train = pred_all[:, :n_train]
-pred_val = pred_all[:, n_train:n_train+n_val]
 pred_test = pred_all[:, n_train+n_val:]
 
-#Unscale output - use when not in log tranformed space! 
-#training
-# flowpred_train = unscale_series(pred_train[0,:],labelscales).numpy()
-# flowobs_train = unscale_series(c['labels_train'][0,:],labelscales).numpy()
-# rainseries_train = unscale_series(c['inputs_train'][0,:,0], inputscales).numpy()
-
-# #Validation 
-# flowpred_val = unscale_series(pred_val[0,:],labelscales).numpy()
-# flowobs_val = unscale_series(c['labels_val'][0,:],labelscales).numpy()
-# rainseries_val = unscale_series(c['inputs_val'][0,:,0], inputscales).numpy()
-
-# #Test 
-# flowpred_test = unscale_series(pred_test[0,:],labelscales).numpy()
-# flowobs_test = unscale_series(c['labels_test'][0,:],labelscales).numpy()
+#Unscale output - use when not in log tranformed space!
+# flowpred_full = unscale_series(pred_full[0,:], labelscales).numpy()
+# flowobs_full  = unscale_series(labels_full[0,:], labelscales).numpy()
+# rainseries_full = unscale_series(rain_full, inputscales).numpy()
+# flowpred_test = unscale_series(pred_test[0,:], labelscales).numpy()
+# flowobs_test  = unscale_series(c['labels_test'][0,:], labelscales).numpy()
 # rainseries_test = unscale_series(c['inputs_test'][0,:,0], inputscales).numpy()
 
-#Unscale output - use when in log transformed space! 
-flowpred_train = np.exp(unscale_series(pred_train[0,:], labelscales).numpy()) - non_zero
-flowobs_train  = np.exp(unscale_series(c['labels_train'][0,:], labelscales).numpy()) - non_zero
-rainseries_train = unscale_series(c['inputs_train'][0,:,0], inputscales).numpy()  # inputs unchanged
-
-flowpred_val = np.exp(unscale_series(pred_val[0,:], labelscales).numpy()) - non_zero
-flowobs_val  = np.exp(unscale_series(c['labels_val'][0,:], labelscales).numpy()) - non_zero
-rainseries_val = unscale_series(c['inputs_val'][0,:,0], inputscales).numpy()
+#Unscale output - use when in log transformed space!
+flowpred_full = np.exp(unscale_series(pred_full[0,:], labelscales).numpy()) - non_zero
+flowobs_full  = np.exp(unscale_series(labels_full[0,:], labelscales).numpy()) - non_zero
+rainseries_full = unscale_series(rain_full, inputscales).numpy()
 
 flowpred_test = np.exp(unscale_series(pred_test[0,:], labelscales).numpy()) - non_zero
 flowobs_test  = np.exp(unscale_series(c['labels_test'][0,:], labelscales).numpy()) - non_zero
 rainseries_test = unscale_series(c['inputs_test'][0,:,0], inputscales).numpy()
 
 ######### EVALUATION ###########
-#Calculate the NSE on training 
-nse_train = nse(flowobs_train, flowpred_train)
-print(f'Training NSE: {nse_train:3f}')
+#Headline LOCO result: NSE on the full held-out catchment, post-warmup
+nse_full = nse(flowobs_full, flowpred_full)
+print(f'LOCO Test NSE (full held-out series, post-warmup): {nse_full:.3f}')
 
-#PLot training predictions
-fig,ax = plt.subplots(nrows=2)
-ax[0].plot(rainseries_train)
+fig, ax = plt.subplots(nrows=2, figsize=(12, 6))
+ax[0].plot(rainseries_full, linewidth=0.5)
 ax[0].set_ylabel('Rainfall [mm/d]')
-ax[0].set_title(f'{name} LOCO - Training (NSE = {nse_train:.3f})')
-ax[1].plot(flowobs_train, label='Observed')
-ax[1].plot(flowpred_train, label='Predicted')
+ax[0].set_title(f'{name} LOCO - Held-out catchment (NSE = {nse_full:.3f})')
+ax[1].plot(flowobs_full, label='Observed')
+ax[1].plot(flowpred_full, label='Predicted')
 ax[1].set_ylabel('Flow [mm/d]')
 ax[1].set_xlabel('Time [days]')
 ax[1].legend()
-fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_training_predictions_logspace.png'), dpi=150)
+fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_predictions_logspace.png'), dpi=150)
 plt.close()
 
-#Calculate NSE on validation set, 1 = perfect, 0 = no better than predicting the mean
-nse_val = nse(flowobs_val, flowpred_val)
-print(f'Validation NSE: {nse_val:3f}')
-
-#PLot Validation predictions 
-fig,ax = plt.subplots(nrows=2, figsize = (12, 6))
-ax[0].plot(rainseries_val, linewidth = 0.5)
-ax[0].set_ylabel('Rainfall [mm/d]')
-ax[0].set_title(f'{name} LOCO - Validation (NSE = {nse_val:.3f})')
-ax[1].plot(flowobs_val, label='Observed')
-ax[1].plot(flowpred_val, label='Predicted')
-ax[1].set_ylabel('Flow [mm/d]')
-ax[1].set_xlabel('Time [days]')
-ax[1].legend()
-fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_validation_predictions_logspace.png'), dpi=150)
-plt.close()
-
-#Calcualte NSE on test period 
+#Cross-model comparison: NSE and plot on the last-10% slice that other course models were tested on
 nse_test = nse(flowobs_test, flowpred_test)
-print(f'Test NSE: {nse_test:.3f}')
+print(f'Cross-model comparison NSE (last 10% slice): {nse_test:.3f}')
 
-#Plot Test Predictions 
-fig,ax = plt.subplots(nrows=2, figsize = (12, 6))
-ax[0].plot(rainseries_test, linewidth = 0.5)
+fig, ax = plt.subplots(nrows=2, figsize=(12, 6))
+ax[0].plot(rainseries_test, linewidth=0.5)
 ax[0].set_ylabel('Rainfall [mm/d]')
-ax[0].set_title(f'{name} LOCO - Test (NSE = {nse_test:.3f})')
+ax[0].set_title(f'{name} LOCO - Test period for cross-model comparison (NSE = {nse_test:.3f})')
 ax[1].plot(flowobs_test, label='Observed')
 ax[1].plot(flowpred_test, label='Predicted')
 ax[1].set_ylabel('Flow [mm/d]')
@@ -174,30 +151,28 @@ ax[1].legend()
 fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_test_predictions_logspace.png'), dpi=150)
 plt.close()
 
-#Check Residuals - must happen in tranformed space! 
-#Plot histogram of residuals on validation period to confirm if normally distributed
-residuals = np.log(flowobs_val + non_zero) - np.log(flowpred_val + non_zero)
+#Check Residuals on the full held-out series (must happen in transformed space)
+residuals = np.log(flowobs_full + non_zero) - np.log(flowpred_full + non_zero)
+
 fig, ax = plt.subplots()
 ax.hist(residuals, bins=50)
 ax.axvline(0, color='red', linestyle='--', label='Zero')
 ax.set_xlabel('Log-Transformed Residual [mm/d]')
 ax.set_ylabel('No. of occurences')
-ax.set_title(f'{name} LOCO - Residual Histogram')
+ax.set_title(f'{name} LOCO - Residual Histogram (full held-out series)')
 ax.legend()
 fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_residuals_histogram_logspace.png'), dpi=150)
 plt.close()
 
-#Plot residuals over time to check for white noise
 fig, ax = plt.subplots()
-ax.plot(residuals, color = 'steelblue', linewidth = 0.5)
-ax.axhline(0, color = 'red', linestyle = '--', linewidth =1)
+ax.plot(residuals, color='steelblue', linewidth=0.5)
+ax.axhline(0, color='red', linestyle='--', linewidth=1)
 ax.set_xlabel('Time [days]')
 ax.set_ylabel('Log-Transformed Residual [mm/d]')
-ax.set_title('Residuals over time (LOCO)')
+ax.set_title(f'{name} LOCO - Residuals over time')
 fig.savefig(os.path.join(figures_dir, f'{name}_LOCO_Residuals_timeseries_logspace.png'), dpi=150)
 plt.close()
 
-#PLot autocorrelation function 
 fig, ax = plt.subplots()
 plot_acf(residuals, lags=60, ax=ax)
 ax.set_xlabel('Lag [days]')
