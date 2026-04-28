@@ -33,7 +33,7 @@ n_static = 8
 #Compute global scaling from all training data (must match training data)
 all_inputs_train = torch.cat([c['inputs_train'] for c in catchment_data], dim=1)
 all_labels_train = torch.cat([c['labels_train'] for c in catchment_data], dim=1)
-_, inputscales = scale_series(all_inputs_train)
+_, inputscales = scale_series(all_inputs_train, per_feature = True)
 _, labelscales = scale_series(all_labels_train)
 
 #Scale each catchment 
@@ -47,10 +47,10 @@ for c in catchment_data:
 
 #Scale the static attributes used as input  
 all_static = torch.stack([c['static'] for c in catchment_data])
-static_mean = all_static.mean(dim=0)
-static_std = all_static.std(dim=0)
+_, staticscales = scale_series(all_static, per_feature=True)
+
 for c in catchment_data:
-    c['static_scaled'] = (c['static'] - static_mean) / static_std
+    c['static_scaled'], _ = scale_series(c['static'], staticscales)
 
 #Load the trained model (done in B script)
 model = LSTMModel(ninputs,nhidden,1,nlayers,0, n_static = n_static)
@@ -85,18 +85,18 @@ for c in catchment_data:
     #training
     flowpred_train = unscale_series(pred_train[0,:],labelscales).numpy()
     flowobs_train = unscale_series(c['labels_train'][0,:],labelscales).numpy()
-    rainseries_train = unscale_series(c['inputs_train'][0,:,0], inputscales).numpy()
+    rainseries_train = unscale_series(c['inputs_train'], inputscales)[0, :, 0].numpy()
 
     #Validation 
     flowpred_val = unscale_series(pred_val[0,:],labelscales).numpy()
     flowobs_val = unscale_series(c['labels_val'][0,:],labelscales).numpy()
-    rainseries_val = unscale_series(c['inputs_val'][0,:,0], inputscales).numpy()
+    rainseries_val = unscale_series(c['inputs_val'], inputscales)[0, :, 0].numpy()
 
 
     #Test 
     flowpred_test = unscale_series(pred_test[0,:],labelscales).numpy()
     flowobs_test = unscale_series(c['labels_test'][0,:],labelscales).numpy()
-    rainseries_test = unscale_series(c['inputs_test'][0,:,0], inputscales).numpy()
+    rainseries_test = unscale_series(c['inputs_test'], inputscales)[0, :, 0].numpy()
 
 
     ######### EVALUATION ###########

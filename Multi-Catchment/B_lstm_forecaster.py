@@ -75,10 +75,12 @@ def load_catchment(catchment_name):
         'labels_val' : labels[:,index_validation:index_test],
         'labels_test' : labels[:,index_test:]}
     
-def scale_series(data,zscale=None):
-    if not zscale:
-        mean = data[~torch.isnan(data)].mean()
-        std = data[~torch.isnan(data)].std()
+#Scale series individually for each feature, dynamic and static 
+def scale_series(data,zscale=None, per_feature = False):
+    if zscale is None: 
+        dim = tuple(range(data.dim() - 1)) if per_feature else None 
+        mean = torch.nanmean(data, dim = dim)
+        std = torch.sqrt(torch.nanmean((data - mean) **2, dim = dim))
         zscale = (mean, std)
     data_scaled = (data - zscale[0])/zscale[1]
     return(data_scaled,zscale)
@@ -121,7 +123,7 @@ if __name__ == '__main__':
     all_inputs_train = torch.cat([c['inputs_train'] for c in catchment_data], dim = 1)
     all_labels_train = torch.cat([c['labels_train'] for c in catchment_data], dim = 1)
 
-    _, inputscales = scale_series(all_inputs_train)
+    _, inputscales = scale_series(all_inputs_train, per_feature = True)
     _, labelscales = scale_series(all_labels_train)
 
     #Scale each catchment using the global stats 
@@ -135,11 +137,10 @@ if __name__ == '__main__':
 
     #Scale static features per-column (each attribute has different units, so one mean/std per column)
     all_static = torch.stack([c['static'] for c in catchment_data])  #(n_catchments, 8)
-    static_mean = all_static.mean(dim = 0)
-    static_std = all_static.std(dim = 0)
+    _, staticscales = scale_series(all_static, per_feature = True)
 
     for c in catchment_data:
-        c['static_scaled'] = (c['static'] - static_mean) / static_std
+        c['static_scaled'], _ = scale_series(c['static'], staticscales)
 
     #################################################################
     #Create model object. The model architecture is defined in model.py

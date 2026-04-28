@@ -36,7 +36,7 @@ nlayers = 1  # no. of LSTM layers, i.e. LSTM cells in sequence
 catchment_data = [load_catchment(c) for c in catchments]
 all_inputs_train = torch.cat([c['inputs_train'] for c in catchment_data], dim = 1)
 all_labels_train = torch.cat([c['labels_train'] for c in catchment_data], dim = 1)
-_, inputscales = scale_series(all_inputs_train)
+_, inputscales = scale_series(all_inputs_train, per_feature = True)
 _, labelscales = scale_series(all_labels_train)
 
 for c in catchment_data: 
@@ -49,10 +49,10 @@ for c in catchment_data:
 
 #Scale static attributes 
 all_static = torch.stack([c['static'] for c in catchment_data]) #(n_catchments=6, n_static=8)
-static_mean = all_static.mean(dim = 0)
-static_std = all_static.std(dim = 0)
+_, staticscales = scale_series(all_static, per_feature=True)
+
 for c in catchment_data: 
-    c['static_scaled'] = (c['static'] - static_mean) / static_std
+    c['static_scaled'], _ = scale_series(c['static'], staticscales)
 
 #################################################################
 #Step 1: Learning Rate Search 

@@ -48,7 +48,7 @@ n_static = 8
 #This is for the 5 training catchments only (do not want to leak Group 2)
 all_inputs_train = torch.cat([c['inputs_train'] for c in train_catchments], dim=1)
 all_labels_train = torch.cat([c['labels_train'] for c in train_catchments], dim=1)
-_, inputscales = scale_series(all_inputs_train)
+_, inputscales = scale_series(all_inputs_train, per_feature = True)
 _, labelscales = scale_series(all_labels_train)
 
 #Apply the scale to Group 2 catchment  
@@ -61,9 +61,8 @@ test_catchment['labels_test'],  _ = scale_series(test_catchment['labels_test'], 
 
 #Scale the static attributes used as input  
 all_static = torch.stack([c['static'] for c in train_catchments])
-static_mean = all_static.mean(dim=0)
-static_std = all_static.std(dim=0)
-test_catchment['static_scaled'] = (test_catchment['static'] - static_mean) / static_std
+_, staticscales = scale_series(all_static, per_feature=True)
+test_catchment['static_scaled'], _ = scale_series(test_catchment['static'], staticscales)
 
 #Load the trained model (done in B script - LOCO)
 model = LSTMModel(ninputs,nhidden,1,nlayers,0, n_static = n_static)
@@ -112,11 +111,11 @@ pred_test = pred_all[:, n_train+n_val:]
 #Unscale output - use when in log transformed space!
 flowpred_full = np.exp(unscale_series(pred_full[0,:], labelscales).numpy()) - non_zero
 flowobs_full  = np.exp(unscale_series(labels_full[0,:], labelscales).numpy()) - non_zero
-rainseries_full = unscale_series(rain_full, inputscales).numpy()
+rainseries_full = unscale_series(inputs_all, inputscales)[0, window_warmup:, 0].numpy()
 
 flowpred_test = np.exp(unscale_series(pred_test[0,:], labelscales).numpy()) - non_zero
 flowobs_test  = np.exp(unscale_series(c['labels_test'][0,:], labelscales).numpy()) - non_zero
-rainseries_test = unscale_series(c['inputs_test'][0,:,0], inputscales).numpy()
+rainseries_test = unscale_series(c['inputs_test'], inputscales)[0, :, 0].numpy()
 
 ######### EVALUATION ###########
 #Headline LOCO result: NSE on the full held-out catchment, post-warmup

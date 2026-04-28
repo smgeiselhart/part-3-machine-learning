@@ -36,7 +36,7 @@ def run_fold(test_catchment_name):
     window_train = 365 * 4        # 4 years of training
     window_total = window_warmup + window_train  # total window length per batch
 
-    epochs = 500
+    epochs = 1000
     ninputs = len(feature_cols)
     nhidden = 64
     nlayers = 1
@@ -76,7 +76,7 @@ def run_fold(test_catchment_name):
     #Compute input and label scales from the 5 training catchments ONLY 
     all_inputs_train = torch.cat([c['inputs_train'] for c in train_catchments], dim=1)
     all_labels_train = torch.cat([c['labels_train'] for c in train_catchments], dim=1)
-    _, inputscales = scale_series(all_inputs_train)
+    _, inputscales = scale_series(all_inputs_train, per_feature = True)
     _, labelscales = scale_series(all_labels_train)
 
     #Apply the scale to the 5 training catchments 
@@ -92,11 +92,11 @@ def run_fold(test_catchment_name):
 
     # Scale static attributes
     all_static = torch.stack([c['static'] for c in train_catchments])
-    static_mean = all_static.mean(dim=0)
-    static_std = all_static.std(dim=0)
+    _, staticscales = scale_series(all_static, per_feature=True)
+
     for c in train_catchments:
-        c['static_scaled'] = (c['static'] - static_mean) / static_std
-    test_static_scaled = (test_catchment['static'] - static_mean) / static_std
+        c['static_scaled'], _ = scale_series(c['static'], staticscales)
+    test_static_scaled, _ = scale_series(test_catchment['static'], staticscales)
 
     # Pre-stack all static attributes as a (n_catchments, n_static) tensor for batching
     all_static_scaled = torch.stack([c['static_scaled'] for c in train_catchments])
