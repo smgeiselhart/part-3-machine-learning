@@ -64,9 +64,7 @@ flowobs_test = unscale_series(labels_test[0,:],labelscales).numpy()
 
 #Save predictions to be used in Diebold Mariano Test (separate script)
 np.save('predictions_val.npy', flowpred_val)
-np.save('predictions_test.npy', flowpred_test)
 np.save('observations_val.npy', flowobs_val)
-np.save('observations_test.npy', flowobs_test)
 
 ######### EVALUATION ###########
 #Calculate the NSE on training 
@@ -225,7 +223,7 @@ test_predictions = pd.DataFrame({
     'observed_m3s': flowobs_test * CATCHMENT_AREA_M2 / 1000 / 86400,
 }, index=dates_test)
 test_predictions.index.name = 'date'
-test_predictions.to_csv('Data/test_predictions.csv')
+test_predictions.to_csv('Data/test_predictions_run1.csv')
 
 
 

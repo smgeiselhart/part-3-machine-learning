@@ -1,24 +1,29 @@
-#This script compares two models with teh Diebold Mariano Test: 
+#This script compares two models with the Diebold Mariano Test: 
     #Original model with 9 features 
     #Simplified model with 7 features, updated based on feature analysis 
 #The C script in each model folder saves the predictions and observations to a numpy array that is then loaded here
+#The B and C script of each model was run 5 times WITHOUT the seed and manually saved to different npy files that are read here 
 
 import numpy as np 
 from scipy import stats 
 
+N_RUNS = 5
 
-#Load both sets of predictions and one set of observations (obsv are the same for both)
-pred_9feat = np.load('LSTM_Havelse_9features/predictions_test.npy')
-pred_7feat = np.load('LSTM_Havelse_7features/predictions_test.npy')
-obs = np.load('LSTM_Havelse_9features/observations_test.npy') #can be from either model 
+#Load observations 
+obs = np.load('LSTM_Havelse_9features/observations_val.npy') #can be from either model 
+
+d_per_run = []
+for run_idx in range (1, N_RUNS + 1):
+    pred_9feat = np.load(f'LSTM_Havelse_9features/predictions_val_run{run_idx}.npy')
+    pred_7feat = np.load(f'LSTM_Havelse_7features/predictions_val_run{run_idx}.npy')
+    d_run = (obs - pred_9feat) ** 2 - (obs - pred_7feat) ** 2
+    d_per_run.append(d_run)
+
+d = np.mean(d_per_run, axis = 0)
 
 #Define the Diebold Mariano test function 
 #H0: 7-feature model is not worse than 9-feature model 
-#using h = 80 based on HBV model parameter calibration (k1_ls1)
-def diebold_mariano(obs, pred1, pred2, h=80):
-    e1 = obs - pred1
-    e2 = obs - pred2
-    d = e1 ** 2 - e2 **2
+def diebold_mariano(d, h):
 
     n = len(d)
     mean_d = np.mean(d)
@@ -37,11 +42,12 @@ def diebold_mariano(obs, pred1, pred2, h=80):
     
     return dm_stat, p_value 
 
-dm_stat, p_value = diebold_mariano(obs, pred_9feat, pred_7feat)
+#using h = 80 based on HBV model parameter calibration (k1_ls1)
+dm_stat, p_value = diebold_mariano(d, h = 80)
 print(f'DM statistic: {dm_stat:.3f}')
 print(f'P-value: {p_value:.4f}')
 
 if p_value < 0.05:
     print('9-feature model is significantly better, removing features hurt the model')
 else: 
-    print('9-feature model is NOT signficiantly better, removing the features did NOT hurt the model')
+    print('9-feature model is NOT significantly better, removing the features did NOT hurt the model')
